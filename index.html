@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>9GP球隊 個人成績與歷史資料查詢</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#182E4A', /* 高質感深藍色 */
+                        accent: '#AE320B',  /* 專屬深磚紅色，用於請假與重要註記 */
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800 pb-12">
+
+    <header class="bg-primary text-white p-6 shadow-md">
+        <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center">
+            <h1 class="text-2xl font-bold tracking-wider mb-4 md:mb-0">9GP球隊 成績查詢系統</h1>
+            <div class="w-full md:w-64">
+                <select id="playerSelect" class="w-full p-2 rounded text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-accent" disabled>
+                    <option value="">讀取資料中...</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <div id="statusMessage" class="max-w-5xl mx-auto mt-4 px-4 text-center text-accent font-bold hidden"></div>
+
+    <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden">
+        
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white p-4 rounded-xl shadow border-l-4 border-primary">
+                <div class="text-sm text-gray-500">出賽總場次</div>
+                <div class="text-2xl font-bold text-primary"><span id="statGames">0</span> <span class="text-sm text-gray-400 font-normal">/ 請假 <span id="statLeaves">0</span></span></div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow border-l-4 border-primary">
+                <div class="text-sm text-gray-500">平均總桿數</div>
+                <div class="text-2xl font-bold text-primary" id="statAvgGross">0</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow border-l-4 border-accent">
+                <div class="text-sm text-gray-500">生涯最佳成績</div>
+                <div class="text-2xl font-bold text-accent" id="statBestGross">0</div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow border-l-4 border-primary">
+                <div class="text-sm text-gray-500">累計獲獎次數</div>
+                <div class="text-2xl font-bold text-primary" id="statAwards">0</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-4 rounded-xl shadow md:col-span-2">
+                <h2 class="text-lg font-bold text-primary mb-4">總桿數歷史走勢</h2>
+                <canvas id="scoreChart" height="100"></canvas>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow">
+                <h2 class="text-lg font-bold text-accent mb-4">🏆 榮譽榜</h2>
+                <ul id="awardList" class="space-y-3 overflow-y-auto max-h-64 pr-2">
+                    </ul>
+            </div>
+        </div>
+
+        <div>
+            <h2 class="text-xl font-bold text-primary mb-4">賽事明細紀錄</h2>
+            <div id="historyCards" class="space-y-4">
+                </div>
+        </div>
+
+    </main>
+
+    <script>
+        let golfData = [];
+        let currentChart = null;
+
+        // 頁面載入後，自動抓取旁邊的 JSON 檔案
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchData();
+        });
+
+        // 讀取 JSON 檔案函數
+        async function fetchData() {
+            const selectBox = document.getElementById('playerSelect');
+            const statusMsg = document.getElementById('statusMessage');
+            
+            try {
+                // 嘗試讀取同一層目錄下的 golf_scores.json
+                const response = await fetch('./golf_scores.json');
+                
+                if (!response.ok) {
+                    throw new Error('無法讀取 golf_scores.json，請確認檔案是否存在。');
+                }
+                
+                golfData = await response.json();
+                
+                // 資料讀取成功，初始化選單
+                initSelect();
+                
+            } catch (error) {
+                console.error("資料讀取錯誤: ", error);
+                selectBox.innerHTML = '<option value="">資料載入失敗</option>';
+                statusMsg.textContent = "⚠️ 無法載入成績資料。若是直接點擊 HTML 檔案開啟，瀏覽器安全機制會阻擋讀取 JSON。請上傳至 GitHub Pages 或使用本地伺服器開啟。";
+                statusMsg.classList.remove('hidden');
+            }
+        }
+
+        // 初始化下拉選單
+        function initSelect() {
+            const select = document.getElementById('playerSelect');
+            select.innerHTML = '<option value="">-- 請選擇球員 --</option>'; // 清除「讀取中」文字
+            select.disabled = false; // 解除鎖定
+
+            const players = [...new Set(golfData.map(d => d['球員姓名']))].sort();
+            
+            players.forEach(player => {
+                if(!player) return;
+                const option = document.createElement('option');
+                option.value = player;
+                option.textContent = player;
+                select.appendChild(option);
+            });
+
+            select.addEventListener('change', (e) => {
+                const player = e.target.value;
+                if (player) {
+                    document.getElementById('mainContent').classList.remove('hidden');
+                    updateDashboard(player);
+                } else {
+                    document.getElementById('mainContent').classList.add('hidden');
+                }
+            });
+        }
+
+        // 更新所有儀表板資訊
+        function updateDashboard(playerName) {
+            let playerData = golfData.filter(d => d['球員姓名'] === playerName);
+            playerData.sort((a, b) => new Date(a['賽事日期']) - new Date(b['賽事日期']));
+
+            const playedGames = playerData.filter(d => d['總桿數'] !== null);
+            const leaveGames = playerData.filter(d => d['名次'] === '請假' || d['總桿數'] === null);
+
+            const totalGross = playedGames.reduce((sum, d) => sum + d['總桿數'], 0);
+            const avgGross = playedGames.length ? (totalGross / playedGames.length).toFixed(1) : 0;
+            const bestGross = playedGames.length ? Math.min(...playedGames.map(d => d['總桿數'])) : '-';
+            const awards = playedGames.filter(d => d['所獲獎項'] !== null && d['所獲獎項'].trim() !== '');
+
+            document.getElementById('statGames').textContent = playedGames.length;
+            document.getElementById('statLeaves').textContent = leaveGames.length;
+            document.getElementById('statAvgGross').textContent = avgGross;
+            document.getElementById('statBestGross').textContent = bestGross;
+            document.getElementById('statAwards').textContent = awards.length;
+
+            renderChart(playerData);
+            renderAwards(awards);
+            renderHistoryCards([...playerData].reverse());
+        }
+
+        // 繪製走勢圖
+        function renderChart(data) {
+            const ctx = document.getElementById('scoreChart').getContext('2d');
+            
+            if (currentChart) {
+                currentChart.destroy();
+            }
+
+            currentChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d['賽事日期']),
+                    datasets: [{
+                        label: '總桿數',
+                        data: data.map(d => d['總桿數']),
+                        borderColor: '#182E4A',
+                        backgroundColor: '#182E4A',
+                        borderWidth: 2,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#AE320B',
+                        spanGaps: false,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            reverse: true,
+                            title: { display: true, text: '總桿數' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+
+        // 繪製榮譽榜
+        function renderAwards(awards) {
+            const list = document.getElementById('awardList');
+            list.innerHTML = '';
+            
+            if(awards.length === 0) {
+                list.innerHTML = '<li class="text-gray-400 text-sm">暫無獲獎紀錄</li>';
+                return;
+            }
+
+            [...awards].reverse().forEach(a => {
+                const li = document.createElement('li');
+                li.className = 'border-b border-gray-100 pb-2 text-sm';
+                li.innerHTML = `
+                    <div class="text-xs text-gray-500">${a['賽事日期']}</div>
+                    <div class="font-bold text-gray-800">${a['所獲獎項']} <span class="text-accent ml-1 text-xs">(總桿: ${a['總桿數']})</span></div>
+                `;
+                list.appendChild(li);
+            });
+        }
+
+        // 繪製歷史明細卡片
+        function renderHistoryCards(data) {
+            const container = document.getElementById('historyCards');
+            container.innerHTML = '';
+
+            data.forEach(d => {
+                const isLeave = (d['名次'] === '請假' || d['總桿數'] === null);
+                
+                const cardBg = isLeave ? 'bg-[#AE320B]/10 border-l-4 border-accent' : 'bg-white shadow border-l-4 border-transparent hover:border-primary transition-all';
+                const textColor = isLeave ? 'text-accent font-bold' : 'text-gray-700';
+                
+                const card = document.createElement('div');
+                card.className = `p-4 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-4 ${cardBg}`;
+                
+                let detailsHtml = '';
+                if (isLeave) {
+                    detailsHtml = `<div class="text-accent font-bold tracking-widest text-lg">請假</div>`;
+                } else {
+                    detailsHtml = `
+                        <div class="grid grid-cols-4 gap-4 text-center w-full md:w-auto">
+                            <div><span class="block text-xs text-gray-400 mb-1">總桿</span><span class="font-bold text-lg text-primary">${d['總桿數']}</span></div>
+                            <div><span class="block text-xs text-gray-400 mb-1">淨桿</span><span class="font-semibold text-gray-600">${d['淨桿數']}</span></div>
+                            <div><span class="block text-xs text-gray-400 mb-1">差點</span><span class="text-sm text-gray-500">${d['差點']}</span></div>
+                            <div><span class="block text-xs text-gray-400 mb-1">名次</span><span class="font-bold text-accent">${d['名次']}</span></div>
+                        </div>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div class="md:w-1/3">
+                        <div class="text-sm font-bold ${textColor}">${d['賽事日期']}</div>
+                        <div class="text-sm text-gray-500">${d['例賽名稱']}</div>
+                        ${d['所獲獎項'] ? `<div class="mt-1 inline-block bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded">🏆 ${d['所獲獎項']}</div>` : ''}
+                    </div>
+                    <div class="md:w-2/3 flex justify-end items-center">
+                        ${detailsHtml}
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+    </script>
+</body>
+</html>
