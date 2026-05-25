@@ -22,8 +22,14 @@
 <body class="bg-gray-100 font-sans text-gray-800 pb-12">
 
     <header class="bg-primary text-white p-6 shadow-md relative z-50">
-        <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center">
-            <h1 class="text-2xl font-bold tracking-wider mb-4 md:mb-0">9GP球隊 成績查詢系統</h1>
+        <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-4 mb-2 md:mb-0">
+                <img src="./logo.png" alt="9GP球隊 Logo" class="w-14 h-14 rounded-full bg-white object-contain shadow-md border border-white/20">
+                <div>
+                    <h1 class="text-2xl font-bold tracking-wider">9GP球隊 成績查詢系統</h1>
+                    <div class="mt-1 text-sm text-white/80">成績更新日期：<span id="lastUpdatedDate">-</span></div>
+                </div>
+            </div>
             
             <div class="w-full md:w-64 relative">
                 <button id="playerSelectBtn" disabled class="w-full bg-white text-gray-800 p-3 rounded-lg font-semibold flex justify-between items-center shadow-md focus:outline-none border-2 border-transparent disabled:opacity-70">
@@ -81,6 +87,24 @@
     </main>
 
     <script>
+        const currentMembers = [
+            '王建亞',
+            '陳翊彥',
+            '黃予安',
+            '劉韋廷',
+            '陳奕仲',
+            '曹勇良',
+            '楊嘉一',
+            '陳彥宇',
+            '賀錫敬',
+            '劉維智',
+            '洪榮杰',
+            '陳淂笙',
+            '曾吟芳',
+            '林家進',
+            '何崇華'
+        ];
+
         let golfData = [];
         let currentChart = null;
 
@@ -93,23 +117,32 @@
             const btn = document.getElementById('playerSelectBtn');
             const text = document.getElementById('selectedPlayerText');
             const statusMsg = document.getElementById('statusMessage');
-            
+
             try {
                 // 加上時間戳破除 LINE 與瀏覽器的強力快取，確保永遠抓到最新成績
                 const cacheBuster = new Date().getTime();
                 const response = await fetch(`./golf_scores.json?v=${cacheBuster}`);
-                
+
                 if (!response.ok) throw new Error('無法讀取 JSON');
-                
+
                 golfData = await response.json();
+                updateLastUpdatedDate();
                 initCustomSelect(); // 資料讀取成功，初始化選單
-                
+
             } catch (error) {
-                console.error("資料讀取錯誤: ", error);
+                console.error('資料讀取錯誤: ', error);
                 text.textContent = '資料載入失敗';
-                statusMsg.textContent = "⚠️ 無法載入成績資料。請確認 golf_scores.json 檔案已上傳至同一個資料夾。";
+                statusMsg.textContent = '⚠️ 無法載入成績資料。請確認 golf_scores.json 檔案已上傳至同一個資料夾。';
                 statusMsg.classList.remove('hidden');
             }
+        }
+
+        function updateLastUpdatedDate() {
+            const latestDate = golfData
+                .map(d => d['賽事日期'])
+                .filter(Boolean)
+                .sort((a, b) => new Date(b) - new Date(a))[0] || '-';
+            document.getElementById('lastUpdatedDate').textContent = latestDate;
         }
 
         // 初始化客製化選單 (取代原生 select)
@@ -117,23 +150,26 @@
             const btn = document.getElementById('playerSelectBtn');
             const text = document.getElementById('selectedPlayerText');
             const list = document.getElementById('playerList');
-            
+
             // 解除按鈕鎖定並更新預設文字
             btn.disabled = false;
             text.textContent = '-- 請點擊選擇球員 --';
 
-            const players = [...new Set(golfData.map(d => d['球員姓名']))].sort();
-            
+            const players = [...new Set(golfData.map(d => d['球員姓名']).filter(Boolean))];
+            const currentPlayerSet = new Set(currentMembers);
+            const activePlayers = currentMembers.filter(name => players.includes(name));
+            const formerPlayers = players.filter(name => !currentPlayerSet.has(name)).sort((a, b) => a.localeCompare(b, 'zh-Hant'));
+
             // 清空舊選單
             list.innerHTML = '';
 
-            players.forEach(player => {
-                if(!player) return;
+            const appendPlayerItem = (player, isFormer = false) => {
                 const item = document.createElement('div');
-                // 加大點擊範圍(py-4)以利手機觸控
-                item.className = 'px-4 py-4 md:py-3 cursor-pointer text-gray-800 font-medium border-b border-gray-100 hover:bg-gray-50 active:bg-gray-200 transition-colors last:border-0';
+                item.className = isFormer
+                    ? 'px-4 py-4 md:py-3 cursor-pointer text-gray-400 font-medium border-b border-gray-100 hover:bg-gray-50 active:bg-gray-200 transition-colors last:border-0'
+                    : 'px-4 py-4 md:py-3 cursor-pointer text-gray-800 font-medium border-b border-gray-100 hover:bg-gray-50 active:bg-gray-200 transition-colors last:border-0';
                 item.textContent = player;
-                
+
                 // 點擊球員後的動作
                 item.addEventListener('click', (e) => {
                     e.stopPropagation(); // 防止事件冒泡
@@ -144,7 +180,18 @@
                 });
 
                 list.appendChild(item);
-            });
+            };
+
+            activePlayers.forEach(player => appendPlayerItem(player, false));
+
+            if (formerPlayers.length > 0) {
+                const divider = document.createElement('div');
+                divider.className = 'px-4 py-2 text-xs font-semibold text-gray-400 bg-gray-50 border-b border-gray-100';
+                divider.textContent = '前會員';
+                list.appendChild(divider);
+
+                formerPlayers.forEach(player => appendPlayerItem(player, true));
+            }
 
             // 點擊按鈕展開/收合選單
             btn.addEventListener('click', (e) => {
@@ -187,7 +234,7 @@
         // 繪製走勢圖
         function renderChart(data) {
             const ctx = document.getElementById('scoreChart').getContext('2d');
-            
+
             if (currentChart) {
                 currentChart.destroy();
             }
@@ -227,8 +274,8 @@
         function renderAwards(awards) {
             const list = document.getElementById('awardList');
             list.innerHTML = '';
-            
-            if(awards.length === 0) {
+
+            if (awards.length === 0) {
                 list.innerHTML = '<li class="text-gray-400 text-sm">暫無獲獎紀錄</li>';
                 return;
             }
@@ -251,13 +298,13 @@
 
             data.forEach(d => {
                 const isLeave = (d['名次'] === '請假' || d['總桿數'] === null);
-                
+
                 const cardBg = isLeave ? 'bg-[#AE320B]/10 border-l-4 border-accent' : 'bg-white shadow border-l-4 border-transparent hover:border-primary transition-all';
                 const textColor = isLeave ? 'text-accent font-bold' : 'text-gray-700';
-                
+
                 const card = document.createElement('div');
                 card.className = `p-4 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-4 ${cardBg}`;
-                
+
                 let detailsHtml = '';
                 if (isLeave) {
                     detailsHtml = `<div class="text-accent font-bold tracking-widest text-lg">請假</div>`;
