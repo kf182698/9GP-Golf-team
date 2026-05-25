@@ -21,20 +21,25 @@
 </head>
 <body class="bg-gray-100 font-sans text-gray-800 pb-12">
 
-    <header class="bg-primary text-white p-6 shadow-md">
+    <header class="bg-primary text-white p-6 shadow-md relative z-50">
         <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center">
             <h1 class="text-2xl font-bold tracking-wider mb-4 md:mb-0">9GP球隊 成績查詢系統</h1>
-            <div class="w-full md:w-64">
-                <select id="playerSelect" class="w-full p-2 rounded text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-accent" disabled>
-                    <option value="">讀取資料中...</option>
-                </select>
+            
+            <div class="w-full md:w-64 relative">
+                <button id="playerSelectBtn" disabled class="w-full bg-white text-gray-800 p-3 rounded-lg font-semibold flex justify-between items-center shadow-md focus:outline-none border-2 border-transparent disabled:opacity-70">
+                    <span id="selectedPlayerText">讀取資料中...</span>
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </button>
+                
+                <div id="playerList" class="hidden absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border border-gray-200 max-h-72 overflow-y-auto z-50">
+                    </div>
             </div>
         </div>
     </header>
 
     <div id="statusMessage" class="max-w-5xl mx-auto mt-4 px-4 text-center text-accent font-bold hidden"></div>
 
-    <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden">
+    <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden relative z-10">
         
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div class="bg-white p-4 rounded-xl shadow border-l-4 border-primary">
@@ -79,60 +84,78 @@
         let golfData = [];
         let currentChart = null;
 
-        // 頁面載入後，自動抓取旁邊的 JSON 檔案
+        // 頁面載入後，自動抓取 JSON 檔案
         document.addEventListener('DOMContentLoaded', () => {
             fetchData();
         });
 
-        // 讀取 JSON 檔案函數
         async function fetchData() {
-            const selectBox = document.getElementById('playerSelect');
+            const btn = document.getElementById('playerSelectBtn');
+            const text = document.getElementById('selectedPlayerText');
             const statusMsg = document.getElementById('statusMessage');
             
             try {
-                // 嘗試讀取同一層目錄下的 golf_scores.json
-                const response = await fetch('./golf_scores.json');
+                // 加上時間戳破除 LINE 與瀏覽器的強力快取，確保永遠抓到最新成績
+                const cacheBuster = new Date().getTime();
+                const response = await fetch(`./golf_scores.json?v=${cacheBuster}`);
                 
-                if (!response.ok) {
-                    throw new Error('無法讀取 golf_scores.json，請確認檔案是否存在。');
-                }
+                if (!response.ok) throw new Error('無法讀取 JSON');
                 
                 golfData = await response.json();
-                
-                // 資料讀取成功，初始化選單
-                initSelect();
+                initCustomSelect(); // 資料讀取成功，初始化選單
                 
             } catch (error) {
                 console.error("資料讀取錯誤: ", error);
-                selectBox.innerHTML = '<option value="">資料載入失敗</option>';
-                statusMsg.textContent = "⚠️ 無法載入成績資料。若是直接點擊 HTML 檔案開啟，瀏覽器安全機制會阻擋讀取 JSON。請上傳至 GitHub Pages 或使用本地伺服器開啟。";
+                text.textContent = '資料載入失敗';
+                statusMsg.textContent = "⚠️ 無法載入成績資料。請確認 golf_scores.json 檔案已上傳至同一個資料夾。";
                 statusMsg.classList.remove('hidden');
             }
         }
 
-        // 初始化下拉選單
-        function initSelect() {
-            const select = document.getElementById('playerSelect');
-            select.innerHTML = '<option value="">-- 請選擇球員 --</option>'; // 清除「讀取中」文字
-            select.disabled = false; // 解除鎖定
+        // 初始化客製化選單 (取代原生 select)
+        function initCustomSelect() {
+            const btn = document.getElementById('playerSelectBtn');
+            const text = document.getElementById('selectedPlayerText');
+            const list = document.getElementById('playerList');
+            
+            // 解除按鈕鎖定並更新預設文字
+            btn.disabled = false;
+            text.textContent = '-- 請點擊選擇球員 --';
 
             const players = [...new Set(golfData.map(d => d['球員姓名']))].sort();
             
+            // 清空舊選單
+            list.innerHTML = '';
+
             players.forEach(player => {
                 if(!player) return;
-                const option = document.createElement('option');
-                option.value = player;
-                option.textContent = player;
-                select.appendChild(option);
-            });
-
-            select.addEventListener('change', (e) => {
-                const player = e.target.value;
-                if (player) {
+                const item = document.createElement('div');
+                // 加大點擊範圍(py-4)以利手機觸控
+                item.className = 'px-4 py-4 md:py-3 cursor-pointer text-gray-800 font-medium border-b border-gray-100 hover:bg-gray-50 active:bg-gray-200 transition-colors last:border-0';
+                item.textContent = player;
+                
+                // 點擊球員後的動作
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation(); // 防止事件冒泡
+                    text.textContent = player;
+                    list.classList.add('hidden'); // 關閉選單
                     document.getElementById('mainContent').classList.remove('hidden');
                     updateDashboard(player);
-                } else {
-                    document.getElementById('mainContent').classList.add('hidden');
+                });
+
+                list.appendChild(item);
+            });
+
+            // 點擊按鈕展開/收合選單
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                list.classList.toggle('hidden');
+            });
+
+            // 點擊網頁其他空白處時，自動收合選單
+            document.addEventListener('click', (e) => {
+                if (!btn.contains(e.target) && !list.contains(e.target)) {
+                    list.classList.add('hidden');
                 }
             });
         }
