@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>9GP Golf Team Chatbot Demo</title>
+    <link rel="stylesheet" href="./chatbot.css">
+</head>
+<body>
+    <main class="demo-page">
+        <section class="demo-hero">
+            <p class="demo-kicker">9GP Golf Team</p>
+            <h1>Chatbot Demo</h1>
+            <p>這個頁面示範 GitHub Pages 前端透過 HTTPS tunnel 呼叫本機 FastAPI proxy，再轉送到 Ubuntu 上的 Ollama。</p>
+            <a class="demo-link" href="./index.html">返回成績查詢系統</a>
+        </section>
+    </main>
+
+    <section class="chat-widget" aria-label="9GP AI chatbot">
+        <button id="chatToggle" class="chat-toggle" type="button" aria-expanded="true" aria-controls="chatPanel">
+            <span>AI</span>
+        </button>
+
+        <div id="chatPanel" class="chat-panel">
+            <header class="chat-header">
+                <div>
+                    <h2>9GP AI 助理</h2>
+                    <p>本機 Ollama Demo</p>
+                </div>
+                <button id="chatClose" class="chat-icon-button" type="button" aria-label="收合聊天視窗">-</button>
+            </header>
+
+            <div id="chatMessages" class="chat-messages" aria-live="polite">
+                <div class="chat-message assistant">
+                    <div class="chat-bubble">你好，我是 9GP Chatbot Demo。請先把 chatbot.js 的 API_BASE_URL 換成你的 HTTPS tunnel URL。</div>
+                </div>
+            </div>
+
+            <form id="chatForm" class="chat-form">
+                <label class="sr-only" for="chatInput">輸入訊息</label>
+                <textarea id="chatInput" rows="1" maxlength="1000" placeholder="輸入訊息..." required></textarea>
+                <button id="chatSubmit" type="submit">送出</button>
+            </form>
+        </div>
+    </section>
+
+    <script src="./chatbot.js"></script>
+</body>
+</html>
