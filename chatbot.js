@@ -1,4 +1,4 @@
-const API_BASE_URL = "https://biodiversity-circumstances-satisfied-stood.trycloudflare.com";
+const API_BASE_URL = "https://rip-pope-fact-eat.trycloudflare.com";
 const DEMO_API_KEY = "demo key";
 const MAX_MESSAGE_LENGTH = 1000;
 
