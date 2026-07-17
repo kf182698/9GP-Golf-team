@@ -1,0 +1,198 @@
+# =====================================================
+# 9GP Golf Team — 計積規則設定檔
+# 版本: v1.1 (2026-07-16) — TODO 全數清空，可進 repo
+# 依據: 9GP 高爾夫球隊章程 (民國111年7月例賽起實施)
+#       + 總幹事確認事項 (2026-07-16)
+# 說明: 本檔為計分引擎 (scoring.py) 的唯一規則來源。
+#       修改規則時只動本檔，不需改程式碼。
+# =====================================================
+
+meta:
+  team_name: "9GP Golf Team"
+  version: "1.1"
+  charter_effective: "2022-07"       # 民國111年7月
+  award_period: "2025-07 ~ 2026-09"  # 章程所載本期獎項適用期間
+
+# ------------------ 賽制 ------------------
+event:
+  frequency: "every_2_months"   # 章程調整：球敘改為每 2 個月一次
+  ranking_metric: "net"         # 以淨桿排名
+  attendance_subsidy:
+    min: 300
+    max: 500
+    note: "由會長決定每場金額，不影響計分"
+
+course:
+  handicap_basis_par: 72       # 差點計算基準，章程明定固定為 72（不隨球場 par 變動）
+  actual_par_source: "scorecard"   # 該場球場實際標準桿由成績卡取得（例：桃園高爾夫 = 73）
+  hole_pars_source: "scorecard"    # 每洞標準桿由成績卡 OCR 取得，供 Eagle 判定
+  note: >
+    成績卡由 iSwing 雲端高爾夫管理系統列印，含區域(前後九)、HOLE、HDCP、
+    PAR、各半場總和、標準桿、總桿、總桿排名。
+    球場實際 par 可能不等於 72（桃園高爾夫為 73），
+    Eagle 判定與 +N 欄使用實際 par；差點計算一律用 72。
+
+# ------------------ 差點 ------------------
+handicap:
+  max: 36                      # 超過 36 者以 36 計
+  min: 0                       # 下限扣至 0，不為負
+  initial:
+    method: "avg_gross_minus_par"      # 前三場平均總桿 - 72
+    rounds_required: 3
+    fallback: "use_available_rounds"   # 未滿三場：以當月/前次平均總桿計算
+  annual_review:
+    enabled: false             # 年度重算由總幹事親自手算後填入，程式不自動執行
+    mode: "manual_entry"
+    note: >
+      每年度由總幹事以當年度成績平均值-72 手算新差點，
+      直接更新本檔 players 區塊之 handicap 欄位；
+      程式僅負責例賽後的自動扣減。
+
+# 例賽後差點調整：依「調整前」差點區間，對淨桿前三名扣減
+# 注意：淨桿亞、季軍無獎項，但仍需扣減差點（兩者邏輯分離）
+handicap_adjustment:
+  timing: "after_each_event"
+  basis: "handicap_before_event"
+  applies_to_ranks: [1, 2, 3]
+  floor: 0                     # 扣減後不低於 0
+  brackets:
+    - range: [1, 10]
+      net_1st: -1
+      net_2nd: 0
+      net_3rd: 0
+    - range: [11, 20]
+      net_1st: -2
+      net_2nd: -1
+      net_3rd: 0
+    - range: [21, 30]
+      net_1st: -3
+      net_2nd: -2
+      net_3rd: -1
+    - range: [31, 36]
+      net_1st: -4
+      net_2nd: -3
+      net_3rd: -2
+  bracket_zero_rule: "no_adjustment"   # 差點 0 者已達下限，取得名次亦不調整
+
+# ------------------ 同分處理（章程明定）------------------
+tie_break:
+  method: "charter"
+  sequence:
+    - "lower_handicap"         # ① 差點少者優先
+    - "manual_resolution"      # ② 年齡大者優先 → 由總幹事於 admin 頁面手動裁定
+  manual_resolution:
+    blocking: true             # 未裁定前不得計算獎項
+    reason: >
+      幸運分享獎依「淨桿排名單雙號」發獎，排名順序變動會整批改變得獎名單，
+      因此同分未裁定時程式必須停止，不得自行排序或隨機決定。
+    ui: "admin.html 提供拖曳/指定順序介面，並顯示雙方差點供判斷"
+
+# ------------------ 獎項定義 ------------------
+awards:
+  - id: gross_champion
+    name: "總桿冠軍"
+    metric: "gross"
+    rank: 1
+    prize: { type: "cash", amount: 500 }
+    annual_limit_per_player: 1
+    on_limit_reached: "next"          # 順延次低者
+    cascade: true                     # 次低者若亦已領過，繼續往下順延
+
+  - id: net_champion
+    name: "淨桿冠軍"
+    metric: "net"
+    rank: 1
+    prize: { type: "ball", quantity: 1 }
+
+  - id: eagle
+    name: "Eagle 獎"
+    metric: "hole_vs_par"
+    condition: "hole_score <= hole_par - 2"
+    prize: { type: "ball", quantity: 2 }
+    multiple_per_player: true         # 同一人多隻 Eagle 重複發放
+    requires: ["hole_pars", "hole_by_hole_scores"]
+
+  - id: near_pin
+    name: "近洞獎"
+    metric: "manual"                  # 現場人工判定，程式無法計算
+    prize: { type: "ball", quantity: 1 }
+    input: "admin_manual_entry"       # 校對頁面提供手動輸入欄位
+
+  - id: lucky_share
+    name: "幸運分享獎"
+    metric: "parity_of_net_champion"
+    parity_source: "net_score"        # 依淨桿冠軍之「淨桿桿數」單雙判定
+    rule: >
+      淨桿冠軍淨桿為單數 → 淨桿排名 1,3,5,7... 者全數得獎；
+      為雙數 → 淨桿排名 2,4,6,8... 者全數得獎。
+    prize: { type: "cash", amount: 200 }
+    prize_basis: "per_winner"         # 每位得獎者各得 200 元
+
+  - id: presidents_cup
+    name: "會長盃"
+    metric: "manual"
+    timing: "會期結束前舉辦"
+    note: "獎項於當日公告、另行採購，不納入自動計分"
+
+# ------------------ 獎項互斥 ------------------
+exclusivity:
+  gross_and_net: "both"        # 章程未限制，兩獎皆可得
+  net_and_lucky_share: "both"  # 淨桿冠軍排名為 1（單號），單數判定時亦同時得獎
+
+# ------------------ 球場資料庫 ------------------
+# 一次登錄，之後選球場自動帶入每洞 par，減少手動輸入量
+# 用途：Eagle 判定、+N 欄驗證、輸入介面預設值
+courses:
+  - id: "taoyuan_gc"
+    name: "桃園高爾夫俱樂部"
+    aliases: ["桃園高爾夫", "桃園"]
+    nines:
+      - { name: "西", pars: [4,3,5,4,4,4,5,4,3], total: 36 }
+      - { name: "東", pars: [6,4,3,4,4,5,3,4,4], total: 37 }
+    default_combination: ["西", "東"]
+    par_total: 73
+    source: "iSwing 成績卡 2025-06-21"
+  # TODO: 補登其他常打球場（TGC 等）
+
+# ------------------ 來賓處理 ------------------
+# 章程允許邀請來賓與賽，成績卡上會出現非會員姓名
+guests:
+  record_score: true             # 成績仍登錄存查
+  eligible_for_ranking: false    # 不列入淨桿排名
+  eligible_for_awards: false     # 不得獎
+  handicap_adjustment: false     # 不做差點調整
+  handicap: null
+  note: >
+    程式對 players 名冊外的姓名一律標記 is_guest=true，
+    計算排名與獎項前先行排除；成績仍寫入 golf_scores.json 供查閱。
+
+# ------------------ 資料驗證（成績卡交叉檢核）------------------
+validation:
+  checks:
+    - id: "nine_sum"
+      rule: "sum(front_9_holes) == front_9_total AND sum(back_9_holes) == back_9_total"
+    - id: "gross_sum"
+      rule: "front_9_total + back_9_total == gross"
+    - id: "vs_par"
+      rule: "gross - course_actual_par == vs_par_column"
+  on_failure: "flag_row_for_review"   # 校對頁面高亮該列，其餘列綠燈通過
+
+# ------------------ 球員名冊 ------------------
+# 差點基準日: 2026-05-22
+# 同分第二順位（年齡）由總幹事手動裁定，故名冊不儲存出生年月日
+players:
+  - { name: "曹勇良", handicap: 36 }
+  - { name: "曾吟芳", handicap: 36 }
+  - { name: "林家進", handicap: 22 }
+  - { name: "何崇華", handicap: 24 }
+  - { name: "陳淂笙", handicap: 16 }
+  - { name: "陳奕仲", handicap: 20 }
+  - { name: "楊嘉一", handicap: 18 }
+  - { name: "陳彥宇", handicap: 33 }
+  - { name: "王建亞", handicap: 12 }
+  - { name: "黃予安", handicap: 32 }
+  - { name: "劉維智", handicap: 29 }
+  - { name: "陳翊彥", handicap: 14 }
+  - { name: "賀錫敬", handicap: 19 }
+  - { name: "洪榮杰", handicap: 30 }
+  - { name: "劉韋廷", handicap: 28 }

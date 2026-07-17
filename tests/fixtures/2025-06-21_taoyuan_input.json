@@ -1,0 +1,374 @@
+{
+  "date": "2025-06-21",
+  "course": "桃園高爾夫俱樂部",
+  "course_par": 73,
+  "front_nine_name": "西",
+  "back_nine_name": "東",
+  "hole_pars": [
+    4,
+    3,
+    5,
+    4,
+    4,
+    4,
+    5,
+    4,
+    3,
+    6,
+    4,
+    3,
+    4,
+    4,
+    5,
+    3,
+    4,
+    4
+  ],
+  "source": "iSwing 列印成績卡",
+  "manual_awards": {
+    "near_pin": null
+  },
+  "players": [
+    {
+      "name": "王建亞",
+      "is_guest": false,
+      "front_9": [
+        5,
+        4,
+        7,
+        4,
+        5,
+        4,
+        5,
+        5,
+        4
+      ],
+      "back_9": [
+        6,
+        6,
+        3,
+        5,
+        5,
+        5,
+        4,
+        5,
+        4
+      ],
+      "front_9_total": 43,
+      "back_9_total": 43,
+      "gross": 86,
+      "vs_par": 13,
+      "validation": "pass"
+    },
+    {
+      "name": "陳淂笙",
+      "is_guest": false,
+      "front_9": [
+        4,
+        4,
+        7,
+        5,
+        5,
+        5,
+        6,
+        4,
+        4
+      ],
+      "back_9": [
+        7,
+        5,
+        3,
+        5,
+        5,
+        5,
+        4,
+        5,
+        4
+      ],
+      "front_9_total": 44,
+      "back_9_total": 43,
+      "gross": 87,
+      "vs_par": 14,
+      "validation": "pass"
+    },
+    {
+      "name": "陳奕仲",
+      "is_guest": false,
+      "front_9": [
+        5,
+        3,
+        6,
+        4,
+        6,
+        5,
+        6,
+        5,
+        4
+      ],
+      "back_9": [
+        9,
+        6,
+        4,
+        5,
+        5,
+        6,
+        3,
+        5,
+        5
+      ],
+      "front_9_total": 44,
+      "back_9_total": 48,
+      "gross": 92,
+      "vs_par": 19,
+      "validation": "pass"
+    },
+    {
+      "name": "吳俊癸",
+      "is_guest": true,
+      "front_9": [
+        6,
+        5,
+        6,
+        6,
+        6,
+        5,
+        6,
+        5,
+        4
+      ],
+      "back_9": [
+        8,
+        5,
+        4,
+        5,
+        5,
+        7,
+        4,
+        5,
+        4
+      ],
+      "front_9_total": 49,
+      "back_9_total": 47,
+      "gross": 96,
+      "vs_par": 23,
+      "validation": "pass"
+    },
+    {
+      "name": "賀錫敬",
+      "is_guest": false,
+      "front_9": [
+        6,
+        4,
+        8,
+        6,
+        6,
+        6,
+        7,
+        5,
+        5
+      ],
+      "back_9": [
+        7,
+        5,
+        5,
+        5,
+        6,
+        7,
+        3,
+        4,
+        4
+      ],
+      "front_9_total": 53,
+      "back_9_total": 46,
+      "gross": 99,
+      "vs_par": 26,
+      "validation": "pass"
+    },
+    {
+      "name": "洪榮杰",
+      "is_guest": false,
+      "front_9": [
+        6,
+        5,
+        8,
+        6,
+        4,
+        5,
+        6,
+        5,
+        4
+      ],
+      "back_9": [
+        9,
+        5,
+        6,
+        6,
+        6,
+        7,
+        5,
+        6,
+        6
+      ],
+      "front_9_total": 49,
+      "back_9_total": 56,
+      "gross": 105,
+      "vs_par": 32,
+      "validation": "pass"
+    },
+    {
+      "name": "陳彥宇",
+      "is_guest": false,
+      "front_9": [
+        7,
+        4,
+        8,
+        5,
+        6,
+        5,
+        6,
+        6,
+        5
+      ],
+      "back_9": [
+        8,
+        6,
+        5,
+        7,
+        7,
+        8,
+        5,
+        5,
+        4
+      ],
+      "front_9_total": 52,
+      "back_9_total": 55,
+      "gross": 107,
+      "vs_par": 34,
+      "validation": "pass"
+    },
+    {
+      "name": "黃予安",
+      "is_guest": false,
+      "front_9": [
+        5,
+        4,
+        7,
+        6,
+        7,
+        6,
+        7,
+        6,
+        5
+      ],
+      "back_9": [
+        9,
+        5,
+        6,
+        7,
+        6,
+        8,
+        5,
+        6,
+        6
+      ],
+      "front_9_total": 53,
+      "back_9_total": 58,
+      "gross": 111,
+      "vs_par": 38,
+      "validation": "pass"
+    },
+    {
+      "name": "曹勇良",
+      "is_guest": false,
+      "front_9": [
+        6,
+        4,
+        8,
+        6,
+        5,
+        6,
+        7,
+        7,
+        5
+      ],
+      "back_9": [
+        9,
+        5,
+        5,
+        5,
+        6,
+        8,
+        6,
+        7,
+        6
+      ],
+      "front_9_total": 54,
+      "back_9_total": 57,
+      "gross": 111,
+      "vs_par": 38,
+      "validation": "pass"
+    },
+    {
+      "name": "陳紫晴",
+      "is_guest": true,
+      "front_9": [
+        6,
+        6,
+        7,
+        7,
+        6,
+        6,
+        7,
+        6,
+        5
+      ],
+      "back_9": [
+        8,
+        5,
+        4,
+        6,
+        5,
+        8,
+        5,
+        7,
+        7
+      ],
+      "front_9_total": 56,
+      "back_9_total": 55,
+      "gross": 111,
+      "vs_par": 38,
+      "validation": "pass"
+    },
+    {
+      "name": "鄭家驊",
+      "is_guest": true,
+      "front_9": [
+        6,
+        5,
+        8,
+        8,
+        6,
+        6,
+        8,
+        7,
+        5
+      ],
+      "back_9": [
+        9,
+        8,
+        7,
+        7,
+        5,
+        8,
+        5,
+        7,
+        7
+      ],
+      "front_9_total": 59,
+      "back_9_total": 63,
+      "gross": 122,
+      "vs_par": 49,
+      "validation": "pass"
+    }
+  ]
+}
