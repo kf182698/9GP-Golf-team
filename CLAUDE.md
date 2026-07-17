@@ -155,12 +155,38 @@ OCR 是選配，手動輸入網格是必備。
 
 ## 開發階段
 
-1. `scoring.py` + `rules.yaml` — 規則程式化，含測試案例
+1. ✅ `scoring.py` + `rules.yaml` — 規則程式化，含測試案例（2026-07-17 完成，見下）
 2. `ocr_parse.py` — 以實際成績卡照片調 prompt，目標欄位辨識率 > 90%
 3. 兩支 Actions workflow 串接
 4. PWA 前端（admin.html + 升級 index.html）
 
 各階段可獨立驗收。
+
+## 階段 1 實作決定（2026-07-17）
+
+`scripts/scoring.py` 已完成並通過驗收（11 項 pytest 全綠，fixture 完全吻合）。
+後續階段介接時以下列介面為準：
+
+- **入口**：`score(rules, match_input, prior_gross_winners=None)`。
+  `prior_gross_winners` 為本年度已領總桿冠軍者集合，供 cascade 順延；
+  呼叫端（未來 score.yml）負責從歷史成績彙整後傳入，引擎本身不讀 golf_scores.json。
+- **輸出鍵**：`excluded_guests`（姓名列表）、`guest_scores`（來賓成績保留供查閱，
+  含 name/is_guest/gross）、`net_ranking`、`awards`、`handicap_adjustment`。
+- **同分僵局**：淨桿與差點皆同 → 回傳
+  `{needs_manual_resolution: true, tie: {names, net}, reason, ...}`，
+  **不含** awards 與 handicap_adjustment（中止獎項計算）。
+  CLI 以 **exit code 2** 結束，供 Actions 判斷不得發布；正常為 0。
+- **CLI**：`python scripts/scoring.py --rules rules.yaml --input <input.json>`
+  → 結果 JSON 印至 stdout。
+- **獎金/獎品字串格式**：`"cash 500"`、`"ball x1"`；幸運分享獎為 `prize_each: 200`。
+- **prose 欄位約定**：輸出中的 `note`、`tie_break` 為人類閱讀用說明，
+  測試比對一律先剝除（見 `tests/test_scoring.py::strip_prose`），
+  程式或前端不得依賴其內容做邏輯判斷。
+- **測試涵蓋**（除 fixture 主驗收外）：差點 0 者得名次不調整、
+  同分僵局觸發 needs_manual_resolution、總桿冠軍連鎖順延、
+  Eagle 多隻重複發放、幸運分享獎雙數情境。
+- 開發相依：`requirements-dev.txt`（pyyaml、pytest）；
+  執行 `python -m pytest tests/ -v` 驗收。
 
 ## 同分裁定（重要）
 
