@@ -171,10 +171,38 @@ OCR 是選配，手動輸入網格是必備。
      --card-type iswing|handwritten [--out pending/xxx.json]`；
      驗證未全過 exit code 1
    - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
-3. 兩支 Actions workflow 串接
+3. ✅ 兩支 Actions workflow 串接（2026-07-17 完成，見下）
 4. PWA 前端（admin.html + 升級 index.html）
 
 各階段可獨立驗收。
+
+## 階段 3 實作決定（2026-07-17）
+
+新增 `scripts/publish.py`（發布橋接）+ `.github/workflows/{ocr,score}.yml`。
+引擎不讀寫檔案的約定不變；檔案 I/O 全在 publish.py。
+
+- **總桿冠軍年度限領以「章程會期」為準**（總幹事裁定）：
+  `publish.py` 解析 `meta.award_period`（`"YYYY-MM ~ YYYY-MM"`），
+  彙整區間內 golf_scores.json `所獲獎項` 含「總桿冠」者傳入引擎做 cascade。
+  會期換屆時總幹事更新 award_period 即自動重置。
+- **差點扣減自動寫回 rules.yaml**（總幹事裁定）：發布成功後
+  golf_scores.json + rules.yaml 同一 commit 更新。寫回用**逐行正則替換**
+  players 該行 handicap 數字，嚴禁 yaml.dump 整檔重寫（註解必須保留）；
+  匹配不到唯一行即中止。delta=0 不動。
+- **中文列格式**：每場寫全名冊列。排名會員名次 int；來賓 `名次:"來賓"`
+  （總桿保留、差點/淨桿 null）；缺席 `名次:"請假"`（差點=現值）。
+  `例賽名稱` = `YYYY年MM月例賽（短名）`，短名取 courses aliases 最短者。
+  `所獲獎項` 固定順序 `近洞獎、總桿冠、淨桿冠、幸運獎、Eagle獎` 以「、」串接。
+- **冪等**：同日期賽事整批替換後依日期排序，重跑安全。
+- **同分僵局**：publish.py exit 2、不寫任何檔案；score.yml 據此 job fail。
+- **workflow 觸發**：兩支皆 `workflow_dispatch`（供 admin.html 以 GitHub API
+  觸發），不做 push 自動觸發（避免多張照片分次上傳重複跑辨識）。
+  - `ocr.yml` inputs：`image_dir`（整個資料夾餵同一次辨識）、`card_type`。
+    ocr_parse exit 1（有紅字）不視為失敗，草稿照 commit，summary 提示校對。
+  - `score.yml` inputs：`input_path`（確認稿，引擎 input 格式）。
+    發布前先跑 pytest 守門；成功後刪除該場確認稿與同日期 `*_draft.json`。
+- **待辦**：repo Settings → Secrets 需由總幹事加入 `ANTHROPIC_API_KEY`
+  （金鑰只在 Actions 內使用）；Actions 實跑驗證待照片階段一併進行。
 
 ## 階段 1 實作決定（2026-07-17）
 

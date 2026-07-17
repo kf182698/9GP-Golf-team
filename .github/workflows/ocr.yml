@@ -1,0 +1,80 @@
+# 照片 → Claude Vision 辨識 → pending/ 草稿
+# 由 admin.html 於照片上傳完成後以 GitHub API 觸發 workflow_dispatch。
+# Claude API 金鑰只存在 GitHub Secrets（ANTHROPIC_API_KEY），只在此處使用。
+name: OCR 成績卡辨識
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_dir:
+        description: "成績卡照片資料夾（例：scorecards/2025-06-21）"
+        required: true
+        type: string
+      card_type:
+        description: "成績卡類型"
+        required: true
+        type: choice
+        options: [iswing, handwritten]
+        default: iswing
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ocr-${{ github.event.inputs.image_dir }}
+  cancel-in-progress: false
+
+jobs:
+  ocr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安裝相依
+        run: pip install -r requirements-dev.txt
+
+      - name: 辨識成績卡
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          args=()
+          while IFS= read -r f; do
+            args+=(--image "$f")
+          done < <(find "${{ github.event.inputs.image_dir }}" -type f \
+                     \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | sort)
+          if [ ${#args[@]} -eq 0 ]; then
+            echo "::error::${{ github.event.inputs.image_dir }} 內找不到照片"
+            exit 1
+          fi
+          set +e
+          python scripts/ocr_parse.py --rules rules.yaml "${args[@]}" \
+            --card-type "${{ github.event.inputs.card_type }}" | tee ocr_output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          # exit 1 = 有列驗證未過：草稿仍已寫出，交由校對頁面處理，不視為失敗
+          if [ "$rc" -gt 1 ]; then exit "$rc"; fi
+          {
+            echo "## OCR 辨識結果（${{ github.event.inputs.card_type }}）"
+            echo '```'
+            cat ocr_output.txt
+            echo '```'
+            if [ "$rc" -eq 1 ]; then
+              echo "⚠ 有列驗證未通過，請至 admin 頁面校對紅字後再發布。"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 提交草稿
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pending/
+          if git diff --cached --quiet; then
+            echo "沒有新草稿需要提交"
+          else
+            git commit -m "ocr: ${{ github.event.inputs.image_dir }} 辨識草稿（${{ github.event.inputs.card_type }}）"
+            git push
+          fi

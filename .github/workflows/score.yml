@@ -1,0 +1,69 @@
+# 總幹事校對確認 → scoring.py 計分 → 更新 golf_scores.json + rules.yaml 差點
+# 由 admin.html 於校對完成、確認稿 commit 後以 GitHub API 觸發。
+# 同分僵局（publish.py exit 2）→ job 失敗、不發布，待總幹事裁定。
+name: 成績計分發布
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_path:
+        description: "確認稿 JSON 路徑（例：pending/2025-06-21_confirmed.json）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: score-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安裝相依
+        run: pip install -r requirements-dev.txt
+
+      - name: 規則引擎守門測試
+        run: python -m pytest tests/ -q
+
+      - name: 計分並更新成績
+        id: publish
+        run: |
+          set +e
+          python scripts/publish.py --rules rules.yaml \
+            --input "${{ github.event.inputs.input_path }}" \
+            --scores golf_scores.json | tee publish_output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          cat publish_output.txt >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::同分待總幹事裁定，成績未發布"
+          fi
+          exit "$rc"
+
+      - name: 清理 pending 並提交
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          input_path="${{ github.event.inputs.input_path }}"
+          date=$(python -c "import json;print(json.load(open('$input_path'))['date'])" 2>/dev/null || true)
+          # 發布完成：移除該場確認稿與同日期草稿
+          git rm -q --ignore-unmatch "$input_path"
+          if [ -n "$date" ]; then
+            git rm -q --ignore-unmatch "pending/${date}"*_draft.json
+          fi
+          git add golf_scores.json rules.yaml
+          if git diff --cached --quiet; then
+            echo "沒有變更需要提交"
+          else
+            git commit -m "score: 發布 ${{ github.event.inputs.input_path }} 計分結果"
+            git push
+          fi
