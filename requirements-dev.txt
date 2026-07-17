@@ -1,2 +1,3 @@
 pyyaml
 pytest
+anthropic  # ocr_parse.py 呼叫 Claude Vision（測試不需要，延遲 import）

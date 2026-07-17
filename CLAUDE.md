@@ -156,7 +156,21 @@ OCR 是選配，手動輸入網格是必備。
 ## 開發階段
 
 1. ✅ `scoring.py` + `rules.yaml` — 規則程式化，含測試案例（2026-07-17 完成，見下）
-2. `ocr_parse.py` — 以實際成績卡照片調 prompt，目標欄位辨識率 > 90%
+2. 🔶 `ocr_parse.py` — 程式與離線測試完成（2026-07-17）；**驗收待實際成績卡照片**
+   調 prompt，目標欄位辨識率 > 90%。實作決定：
+   - 以 structured outputs（`output_config.format` + JSON Schema）強制輸出格式，
+     model 預設 `claude-opus-4-8`（`OCR_MODEL` 環境變數或 `--model` 覆寫）
+   - iSwing / 手寫共用一支程式，`--card-type` 切換 prompt 與 schema；
+     手寫卡每格 `{value, confidence}`，後處理拆成桿數陣列 +
+     `low_confidence_holes`（< 0.8 標黃）/ `unreadable_holes`（null 標紅）
+   - 三重驗證由 rules.yaml `validation.checks` 驅動；任何 null 格 → 該列 `fail`
+   - 姓名以 difflib 對名冊模糊比對（cutoff 0.6），比對到者正規化並保留
+     `ocr_name` 原始字串；比對不到 → `is_guest: true`
+   - API key 只讀 `ANTHROPIC_API_KEY` 環境變數，未設定即明確報錯
+   - CLI：`python scripts/ocr_parse.py --rules rules.yaml --image <照片> \
+     --card-type iswing|handwritten [--out pending/xxx.json]`；
+     驗證未全過 exit code 1
+   - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
 3. 兩支 Actions workflow 串接
 4. PWA 前端（admin.html + 升級 index.html）
 
