@@ -202,15 +202,34 @@ def compute_handicap_adjustment(ranking, rules):
     return result
 
 
+def guest_scores(guests):
+    """來賓成績：不列入排名與獎項，但成績仍保留於輸出供查閱。"""
+    return [
+        {"name": g["name"], "is_guest": True, "gross": g.get("gross")}
+        for g in guests
+    ]
+
+
 def score(rules, match_input, prior_gross_winners=None):
     """計算一場例賽的完整結果。
 
     prior_gross_winners: 本年度已領過總桿冠軍者集合（供 cascade 順延判斷）。
+    淨桿與差點皆同分時回傳 needs_manual_resolution 標記並中止獎項計算。
     """
     roster = roster_handicaps(rules)
     members, guests = classify_players(match_input["players"], roster)
 
-    ranking = rank_members(members, roster, rules.get("tie_break", {}))
+    try:
+        ranking = rank_members(members, roster, rules.get("tie_break", {}))
+    except TieBreakBlocked as e:
+        # 幸運分享獎依排名單雙發獎，順序未定則得獎名單不定 → 阻斷獎項計算
+        return {
+            "needs_manual_resolution": True,
+            "tie": {"names": e.names, "net": e.net},
+            "reason": str(e),
+            "excluded_guests": [g["name"] for g in guests],
+            "guest_scores": guest_scores(guests),
+        }
 
     net_champ_cfg = award_config(rules, "net_champion")
     gross_champ_cfg = award_config(rules, "gross_champion")
@@ -237,6 +256,7 @@ def score(rules, match_input, prior_gross_winners=None):
 
     return {
         "excluded_guests": [g["name"] for g in guests],
+        "guest_scores": guest_scores(guests),
         "net_ranking": ranking,
         "awards": awards,
         "handicap_adjustment": compute_handicap_adjustment(ranking, rules),
@@ -253,15 +273,10 @@ def main(argv=None):
     with open(args.input, encoding="utf-8") as f:
         match_input = json.load(f)
 
-    try:
-        result = score(rules, match_input)
-    except TieBreakBlocked as e:
-        print(json.dumps({"blocked": True, "reason": str(e)}, ensure_ascii=False),
-              file=sys.stderr)
-        return 2
-
+    result = score(rules, match_input)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    # 同分待裁定時以非零碼結束，供 Actions/腳本判斷不得發布
+    return 2 if result.get("needs_manual_resolution") else 0
 
 
 if __name__ == "__main__":

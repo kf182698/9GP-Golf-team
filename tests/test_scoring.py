@@ -14,7 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-from scoring import TieBreakBlocked, load_rules, score  # noqa: E402
+from scoring import load_rules, score  # noqa: E402
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
 PROSE_KEYS = {"note", "tie_break"}
@@ -52,15 +52,24 @@ def result(rules, match_input):
 
 
 def test_matches_expected_fixture(result, expected):
-    """整體結構比對（忽略 note / tie_break 純文字欄位）。"""
-    assert strip_prose(result) == strip_prose(expected)
+    """整體結構比對（忽略 note / tie_break 純文字欄位）。
+
+    expected fixture 未含 guest_scores（後加的輸出欄位），僅比對 expected 涵蓋的鍵。
+    """
+    got = {k: v for k, v in strip_prose(result).items() if k in expected}
+    assert got == strip_prose(expected)
 
 
-def test_guests_excluded(result):
-    """來賓排除：3 位非會員不列入排名與獎項。"""
+def test_guests_excluded_but_scores_retained(result):
+    """來賓排除：3 位非會員不列入排名與獎項，但成績仍保留於輸出。"""
     assert result["excluded_guests"] == ["吳俊癸", "陳紫晴", "鄭家驊"]
     ranked_names = {r["name"] for r in result["net_ranking"]}
     assert not ranked_names & {"吳俊癸", "陳紫晴", "鄭家驊"}
+    assert result["guest_scores"] == [
+        {"name": "吳俊癸", "is_guest": True, "gross": 96},
+        {"name": "陳紫晴", "is_guest": True, "gross": 111},
+        {"name": "鄭家驊", "is_guest": True, "gross": 122},
+    ]
 
 
 def test_net_ranking_with_tie_breaks(result):
@@ -111,8 +120,8 @@ def test_handicap_adjustment_third_place_zero(result):
     assert adj["王建亞"]["after"] == 12  # 季軍不扣
 
 
-def test_blocking_tie_raises(rules, match_input):
-    """淨桿與差點皆相同 → 阻斷，不得自行排序。"""
+def test_blocking_tie_needs_manual_resolution(rules, match_input):
+    """淨桿與差點皆相同 → 回傳 needs_manual_resolution，中止獎項計算。"""
     # 製造「黃予安 與 曹勇良 差點同為 36、gross 同為 111 → net 同 75」的僵局
     tampered = copy.deepcopy(match_input)
     tampered_rules = copy.deepcopy(rules)
@@ -122,8 +131,13 @@ def test_blocking_tie_raises(rules, match_input):
     for p in tampered["players"]:
         if p["name"] == "黃予安":
             p["gross"] = 111  # net 75 = 曹勇良 net 75
-    with pytest.raises(TieBreakBlocked):
-        score(tampered_rules, tampered)
+    result = score(tampered_rules, tampered)
+    assert result["needs_manual_resolution"] is True
+    assert set(result["tie"]["names"]) == {"黃予安", "曹勇良"}
+    assert result["tie"]["net"] == 75
+    # 獎項與差點調整不得出現在阻斷結果中
+    assert "awards" not in result
+    assert "handicap_adjustment" not in result
 
 
 def test_gross_champion_cascade(rules, match_input):
@@ -132,3 +146,54 @@ def test_gross_champion_cascade(rules, match_input):
     # 86 王建亞已領、87 陳淂笙已領 → 順延至 92 陳奕仲
     assert result["awards"]["gross_champion"]["winner"] == "陳奕仲"
     assert result["awards"]["gross_champion"]["gross"] == 92
+
+
+def test_handicap_zero_winner_no_adjustment(rules, match_input):
+    """差點 0 者得名次 → 已達下限，不做差點調整（bracket_zero_rule）。"""
+    tampered_rules = copy.deepcopy(rules)
+    for p in tampered_rules["players"]:
+        if p["name"] == "王建亞":
+            p["handicap"] = 0
+    tampered = copy.deepcopy(match_input)
+    for p in tampered["players"]:
+        if p["name"] == "王建亞":
+            p["gross"] = 70  # net = 70 - 0 = 70 → 淨桿冠軍
+    result = score(tampered_rules, tampered)
+    assert result["net_ranking"][0]["name"] == "王建亞"
+    assert result["net_ranking"][0]["handicap"] == 0
+    # 冠軍但差點 0 → 不出現在調整名單
+    assert all(a["name"] != "王建亞" for a in result["handicap_adjustment"])
+    # 其餘前三名（遞補的 rank 2、3）仍照常調整
+    assert {a["net_rank"] for a in result["handicap_adjustment"]} <= {2, 3}
+
+
+def test_eagle_multiple_per_player(rules, match_input):
+    """Eagle 多隻重複發放：同一人兩洞達成 → 兩筆獎項。"""
+    tampered = copy.deepcopy(match_input)
+    for p in tampered["players"]:
+        if p["name"] == "王建亞":
+            # 第 3 洞 par 5 打 3（-2）、第 10 洞 par 6 打 4（-2）
+            p["front_9"][2] = 3
+            p["back_9"][0] = 4
+            p["front_9_total"] = sum(p["front_9"])
+            p["back_9_total"] = sum(p["back_9"])
+            p["gross"] = p["front_9_total"] + p["back_9_total"]
+    result = score(rules, tampered)
+    eagles = result["awards"]["eagle"]["winners"]
+    assert [(e["name"], e["hole"]) for e in eagles] == [("王建亞", 3), ("王建亞", 10)]
+    assert all(e["prize"] == "ball x2" for e in eagles)
+
+
+def test_lucky_share_even_parity(rules, match_input):
+    """幸運分享獎雙數情境：淨桿冠軍淨桿為雙數 → 排名 2,4,6,8 得獎。"""
+    tampered = copy.deepcopy(match_input)
+    for p in tampered["players"]:
+        if p["name"] == "陳淂笙":
+            p["gross"] = 86  # net 86-16=70（雙數），仍為淨桿冠軍
+    result = score(rules, tampered)
+    lucky = result["awards"]["lucky_share"]
+    assert lucky["parity_basis"] == 70
+    assert lucky["parity"] == "even"
+    even_rank_names = [r["name"] for r in result["net_ranking"] if r["rank"] % 2 == 0]
+    assert lucky["winners"] == even_rank_names
+    assert lucky["winners"] == ["陳奕仲", "陳彥宇", "曹勇良", "賀錫敬"]
