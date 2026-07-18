@@ -8,13 +8,20 @@
 - iswing      : iSwing 機器列印卡，三重交叉驗證（nine_sum / gross_sum / vs_par）
 - handwritten : 手寫卡，每格附 confidence (0~1)；無法判讀填 null，嚴禁推測
 
-API key 只從環境變數 ANTHROPIC_API_KEY 讀取，不寫入程式碼。
+支援三家 Vision provider（--provider，預設 anthropic）：後處理（正規化、
+姓名比對、三重驗證）三家共用，只有 API 呼叫層不同。schema 由三家各自的
+結構化輸出機制強制。API key 一律只從對應環境變數讀取，不寫入程式碼。
 
 用法:
     export ANTHROPIC_API_KEY=sk-ant-...
     python scripts/ocr_parse.py --rules rules.yaml \\
         --image scorecards/2025-06-21/card1.jpg \\
-        --card-type iswing --out pending/2025-06-21_draft.json
+        --card-type iswing --provider anthropic \\
+        --out pending/2025-06-21_draft.json
+
+    # 換 provider 比對（先設對應金鑰、裝對應 SDK）：
+    #   openai : pip install openai      ; export OPENAI_API_KEY=...
+    #   gemini : pip install google-genai; export GEMINI_API_KEY=...
 """
 
 import argparse
@@ -27,8 +34,15 @@ import sys
 
 import yaml
 
-# 預設模型；可用環境變數 OCR_MODEL 或 --model 覆寫
-DEFAULT_MODEL = "claude-opus-4-8"
+# provider 註冊表：金鑰環境變數 + 預設模型（可用 --model 或 OCR_MODEL 覆寫）。
+# 預設模型僅為起點，實照片測試後可依辨識率調整。
+PROVIDERS = {
+    "anthropic": {"key_env": "ANTHROPIC_API_KEY", "default_model": "claude-opus-4-8"},
+    "openai":    {"key_env": "OPENAI_API_KEY",    "default_model": "gpt-4o"},
+    "gemini":    {"key_env": "GEMINI_API_KEY",    "default_model": "gemini-1.5-pro"},
+}
+DEFAULT_PROVIDER = "anthropic"
+DEFAULT_MODEL = PROVIDERS[DEFAULT_PROVIDER]["default_model"]  # 相容既有引用
 # 手寫卡低信心門檻：低於此值的格子在校對頁面標黃
 LOW_CONFIDENCE_THRESHOLD = 0.8
 # 姓名模糊比對門檻（difflib ratio）
@@ -148,39 +162,93 @@ def build_prompt(card_type, rules):
 # ------------------ Vision API 呼叫 ------------------
 
 def encode_image(path):
+    """讀圖 → (media_type, raw_bytes)，各 provider 再自行包裝格式。"""
     media_type = mimetypes.guess_type(path)[0] or "image/jpeg"
     with open(path, "rb") as f:
-        data = base64.standard_b64encode(f.read()).decode("utf-8")
-    return {"type": "image", "source": {"type": "base64",
-                                        "media_type": media_type, "data": data}}
+        return media_type, f.read()
 
 
-def call_vision(image_paths, card_type, rules, model=None, client=None):
-    """呼叫 Claude Vision 辨識成績卡照片，回傳 schema 相符的 dict。"""
+def _b64(raw):
+    return base64.standard_b64encode(raw).decode("utf-8")
+
+
+def _require_key(provider):
+    env = PROVIDERS[provider]["key_env"]
+    if not os.environ.get(env):
+        raise RuntimeError(f"缺少 {env} 環境變數（API key 不得寫入程式碼）")
+
+
+# --- 各 provider 呼叫層：都回傳 schema 相符的 dict（json.loads 後）---
+
+def _call_anthropic(images, prompt, schema, model, client):
     if client is None:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError(
-                "缺少 ANTHROPIC_API_KEY 環境變數（API key 不得寫入程式碼）"
-            )
         import anthropic
         client = anthropic.Anthropic()
-
-    model = model or os.environ.get("OCR_MODEL", DEFAULT_MODEL)
-    content = [encode_image(p) for p in image_paths]
-    content.append({"type": "text", "text": build_prompt(card_type, rules)})
-
+    content = [{"type": "image", "source": {"type": "base64",
+               "media_type": mt, "data": _b64(raw)}} for mt, raw in images]
+    content.append({"type": "text", "text": prompt})
     with client.messages.stream(
-        model=model,
-        max_tokens=64000,
-        thinking={"type": "adaptive"},
-        output_config={"format": {"type": "json_schema",
-                                  "schema": output_schema(card_type)}},
+        model=model, max_tokens=64000, thinking={"type": "adaptive"},
+        output_config={"format": {"type": "json_schema", "schema": schema}},
         messages=[{"role": "user", "content": content}],
     ) as stream:
         message = stream.get_final_message()
-
     text = next(b.text for b in message.content if b.type == "text")
     return json.loads(text)
+
+
+def _call_openai(images, prompt, schema, model):
+    from openai import OpenAI
+    client = OpenAI()
+    content = [{"type": "text", "text": prompt}]
+    for mt, raw in images:
+        content.append({"type": "image_url",
+                        "image_url": {"url": f"data:{mt};base64,{_b64(raw)}"}})
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": content}],
+        response_format={"type": "json_schema", "json_schema": {
+            "name": "scorecard", "strict": True, "schema": schema}},
+    )
+    return json.loads(resp.choices[0].message.content)
+
+
+def _call_gemini(images, prompt, schema, model):
+    # google-genai 的 response_schema 與本檔 JSON Schema（含 ["integer","null"]
+    # 聯集型別）格式不完全相同，故以 response_mime_type 強制 JSON、schema 由
+    # prompt 描述 + 後段三重驗證把關；實照片測試後可再改用 response_schema。
+    from google import genai
+    from google.genai import types
+    client = genai.Client()
+    parts = [types.Part.from_bytes(data=raw, mime_type=mt) for mt, raw in images]
+    parts.append(types.Part.from_text(text=prompt))
+    resp = client.models.generate_content(
+        model=model, contents=parts,
+        config={"response_mime_type": "application/json"},
+    )
+    return json.loads(resp.text)
+
+
+_DISPATCH = {"anthropic": _call_anthropic, "openai": _call_openai,
+             "gemini": _call_gemini}
+
+
+def call_vision(image_paths, card_type, rules, provider=DEFAULT_PROVIDER,
+                model=None, client=None):
+    """辨識成績卡照片，回傳 schema 相符的 dict。provider 選 anthropic/openai/gemini。"""
+    provider = provider or DEFAULT_PROVIDER
+    if provider not in PROVIDERS:
+        raise ValueError(f"未知 provider: {provider}（可選 {', '.join(PROVIDERS)}）")
+    # 注入 client（測試/anthropic）時免金鑰檢查；否則先檢查金鑰再讀圖
+    if not (provider == "anthropic" and client is not None):
+        _require_key(provider)
+    model = model or os.environ.get("OCR_MODEL") or PROVIDERS[provider]["default_model"]
+    images = [encode_image(p) for p in image_paths]
+    prompt = build_prompt(card_type, rules)
+    schema = output_schema(card_type)
+    if provider == "anthropic":
+        return _call_anthropic(images, prompt, schema, model, client)
+    return _DISPATCH[provider](images, prompt, schema, model)
 
 
 # ------------------ 後處理：手寫卡格式正規化 ------------------
@@ -275,9 +343,11 @@ def validate(parsed, rules):
 
 # ------------------ 主流程 ------------------
 
-def parse_scorecard(image_paths, card_type, rules, model=None, client=None):
+def parse_scorecard(image_paths, card_type, rules, provider=DEFAULT_PROVIDER,
+                    model=None, client=None):
     """照片 → Vision 辨識 → 正規化 → 姓名比對 → 三重驗證 → 草稿 dict。"""
-    parsed = call_vision(image_paths, card_type, rules, model=model, client=client)
+    parsed = call_vision(image_paths, card_type, rules, provider=provider,
+                         model=model, client=client)
     if card_type == "handwritten":
         parsed = normalize_handwritten(parsed)
     parsed = match_names(parsed, rules)
@@ -285,6 +355,7 @@ def parse_scorecard(image_paths, card_type, rules, model=None, client=None):
     parsed["source"] = ("iSwing 列印成績卡" if card_type == "iswing"
                         else "手寫成績卡")
     parsed["card_type"] = card_type
+    parsed["ocr_provider"] = provider          # 供比對時追溯是哪家辨識的
     parsed.setdefault("manual_awards", {"near_pin": None})  # 近洞獎由 admin 手動輸入
     return parsed
 
@@ -296,14 +367,18 @@ def main(argv=None):
                         help="成績卡照片路徑（可重複指定多張）")
     parser.add_argument("--card-type", choices=["iswing", "handwritten"],
                         default="iswing")
+    parser.add_argument("--provider", choices=list(PROVIDERS),
+                        default=DEFAULT_PROVIDER,
+                        help=f"Vision 供應商（預設 {DEFAULT_PROVIDER}）")
     parser.add_argument("--model", default=None,
-                        help=f"覆寫模型（預設 {DEFAULT_MODEL}，亦可用環境變數 OCR_MODEL）")
+                        help="覆寫模型（預設依 provider，亦可用環境變數 OCR_MODEL）")
     parser.add_argument("--out", default=None,
                         help="輸出草稿 JSON 路徑（預設 pending/<date>_draft.json）")
     args = parser.parse_args(argv)
 
     rules = load_rules(args.rules)
-    draft = parse_scorecard(args.image, args.card_type, rules, model=args.model)
+    draft = parse_scorecard(args.image, args.card_type, rules,
+                            provider=args.provider, model=args.model)
 
     out = args.out
     if out is None:

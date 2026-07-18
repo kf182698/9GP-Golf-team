@@ -253,5 +253,6 @@ def test_workflows_parse_and_have_required_fields():
     with open(REPO_ROOT / ".github" / "workflows" / "ocr.yml", encoding="utf-8") as f:
         ocr = yaml.safe_load(f)
     inputs = (ocr.get("on") or ocr.get(True))["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"image_dir", "card_type"}
+    assert set(inputs) == {"image_dir", "card_type", "provider"}
     assert inputs["card_type"]["options"] == ["iswing", "handwritten"]
+    assert inputs["provider"]["options"] == ["anthropic", "openai", "gemini"]

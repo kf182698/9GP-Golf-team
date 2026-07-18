@@ -140,7 +140,46 @@ def test_output_schema_shapes():
 
 
 def test_call_vision_requires_api_key(monkeypatch, rules):
-    """API key 只從環境變數讀取；未設定時應明確報錯而非默默失敗。"""
+    """API key 只從環境變數讀取；未設定時應明確報錯（讀圖前先擋）。"""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         call_vision(["nonexistent.jpg"], "iswing", rules)
+
+
+def test_call_vision_provider_key_env(monkeypatch, rules):
+    """每個 provider 檢查自己的金鑰環境變數。"""
+    for env in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(env, raising=False)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        call_vision(["x.jpg"], "iswing", rules, provider="openai")
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        call_vision(["x.jpg"], "iswing", rules, provider="gemini")
+
+
+def test_call_vision_unknown_provider(rules):
+    with pytest.raises(ValueError, match="未知 provider"):
+        call_vision(["x.jpg"], "iswing", rules, provider="grok")
+
+
+def test_injected_client_skips_key_check(monkeypatch, rules):
+    """注入 client（anthropic）時免金鑰檢查，直接走辨識並回傳解析結果。"""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    payload = {"date": "2025-06-21", "course": "桃園", "course_par": 73,
+               "front_nine_name": "西", "back_nine_name": "東",
+               "hole_pars": [4] * 18, "players": []}
+
+    class FakeStream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get_final_message(self):
+            class B: type = "text"; text = json.dumps(payload)
+            return type("M", (), {"content": [B()]})()
+
+    class FakeClient:
+        class messages:
+            @staticmethod
+            def stream(**kw): return FakeStream()
+
+    img = str(REPO_ROOT / "logo.png")  # 需真實檔（encode_image 會讀圖）
+    out = call_vision([img], "iswing", rules, client=FakeClient())
+    assert out["course_par"] == 73

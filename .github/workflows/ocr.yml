@@ -16,6 +16,12 @@ on:
         type: choice
         options: [iswing, handwritten]
         default: iswing
+      provider:
+        description: "Vision 供應商"
+        required: true
+        type: choice
+        options: [anthropic, openai, gemini]
+        default: anthropic
 
 permissions:
   contents: write
@@ -39,7 +45,10 @@ jobs:
 
       - name: 辨識成績卡
         env:
+          # 依 provider 取用對應金鑰，全部只存在 GitHub Secrets
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           args=()
           while IFS= read -r f; do
@@ -52,7 +61,8 @@ jobs:
           fi
           set +e
           python scripts/ocr_parse.py --rules rules.yaml "${args[@]}" \
-            --card-type "${{ github.event.inputs.card_type }}" | tee ocr_output.txt
+            --card-type "${{ github.event.inputs.card_type }}" \
+            --provider "${{ github.event.inputs.provider }}" | tee ocr_output.txt
           rc=${PIPESTATUS[0]}
           set -e
           # exit 1 = 有列驗證未過：草稿仍已寫出，交由校對頁面處理，不視為失敗

@@ -82,6 +82,7 @@ function newState() {
     holePars: Array(18).fill(4),
     nineNames: ["前九", "後九"],
     cardType: "iswing",
+    provider: "anthropic",
     players: [],               // {name, is_guest, scores:[18], ocr:{validation,low:[],unread:[]}}
     cur: { p: 0, h: 0 },
     nearPin: [],               // 近洞獎得主（手動輸入，程式無法計算）
@@ -184,6 +185,13 @@ function renderStep1() {
         <option value="iswing" ${S.cardType === "iswing" ? "selected" : ""}>iSwing 列印卡</option>
         <option value="handwritten" ${S.cardType === "handwritten" ? "selected" : ""}>手寫卡</option>
       </select>
+      <select id="fProvider" class="border rounded-lg p-2 bg-white text-sm">
+        <option value="anthropic" ${S.provider === "anthropic" ? "selected" : ""}>Anthropic</option>
+        <option value="openai" ${S.provider === "openai" ? "selected" : ""}>OpenAI</option>
+        <option value="gemini" ${S.provider === "gemini" ? "selected" : ""}>Gemini</option>
+      </select>
+    </div>
+    <div class="flex gap-2 items-center">
       <input id="photoIn" type="file" accept="image/*" multiple class="hidden">
       <button id="photoBtn" class="flex-1 border border-primary text-primary rounded-lg py-2 font-semibold text-sm">選照片並上傳辨識</button>
     </div>
@@ -210,6 +218,7 @@ function renderStep1() {
       `區域：${S.nineNames[0]} / ${S.nineNames[1]}　·　每洞 par 已自動帶入，輸入時可一鍵「照par」`;
   }
   $("fCardType").onchange = e => { S.cardType = e.target.value; save(); };
+  $("fProvider").onchange = e => { S.provider = e.target.value; save(); };
   $("photoBtn").onclick = () => {
     if (!localStorage.getItem(PAT_KEY)) return openPat();
     $("photoIn").click();
@@ -249,7 +258,7 @@ async function uploadPhotos(files) {
     const disp = await ghFetch(`/repos/${REPO}/actions/workflows/ocr.yml/dispatches`, {
       method: "POST",
       body: JSON.stringify({ ref: BRANCH,
-        inputs: { image_dir: dir, card_type: S.cardType } }),
+        inputs: { image_dir: dir, card_type: S.cardType, provider: S.provider } }),
     });
     if (disp.status !== 204) throw new Error(`dispatch 失敗 HTTP ${disp.status}`);
     log(`✓ 辨識中（約 1-2 分鐘）。完成後點「載入辨識草稿」預填格子。\n進度：https://github.com/${REPO}/actions`);

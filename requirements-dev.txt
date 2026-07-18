@@ -1,3 +1,6 @@
 pyyaml
 pytest
-anthropic  # ocr_parse.py 呼叫 Claude Vision（測試不需要，延遲 import）
+# OCR provider SDK（ocr_parse.py 延遲 import，測試不需要；ocr.yml 支援任一家）
+anthropic          # --provider anthropic（預設）
+openai             # --provider openai
+google-genai       # --provider gemini

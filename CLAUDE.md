@@ -166,9 +166,16 @@ OCR 是選配，手動輸入網格是必備。
    - 三重驗證由 rules.yaml `validation.checks` 驅動；任何 null 格 → 該列 `fail`
    - 姓名以 difflib 對名冊模糊比對（cutoff 0.6），比對到者正規化並保留
      `ocr_name` 原始字串；比對不到 → `is_guest: true`
-   - API key 只讀 `ANTHROPIC_API_KEY` 環境變數，未設定即明確報錯
+   - **多 provider 可切換**（2026-07-18）：`--provider anthropic|openai|gemini`
+     （預設 anthropic）。後處理三家共用，只有 API 呼叫層不同：anthropic 用
+     `output_config.format`、openai 用 `response_format.json_schema(strict)`、
+     gemini 用 `response_mime_type=json`（schema 由 prompt+後段驗證把關）。
+     金鑰各讀 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`，
+     未設定即明確報錯（讀圖前先擋）。admin.html 步驟①可選 provider，
+     ocr.yml 加 provider input 並注入三把 Secret。SDK 延遲 import，
+     測試不需安裝。換 provider 只動 ~30 行呼叫層，其餘不變。
    - CLI：`python scripts/ocr_parse.py --rules rules.yaml --image <照片> \
-     --card-type iswing|handwritten [--out pending/xxx.json]`；
+     --card-type iswing|handwritten --provider anthropic [--out pending/xxx.json]`；
      驗證未全過 exit code 1
    - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
 3. ✅ 兩支 Actions workflow 串接（2026-07-17 完成，見下）
