@@ -140,6 +140,47 @@ def test_blocking_tie_needs_manual_resolution(rules, match_input):
     assert "handicap_adjustment" not in result
 
 
+def _make_deadlock(rules, match_input):
+    """黃予安差點改 36、gross 改 111 → 與曹勇良淨桿 75 且差點同。"""
+    tampered_rules = copy.deepcopy(rules)
+    tampered = copy.deepcopy(match_input)
+    for p in tampered_rules["players"]:
+        if p["name"] == "黃予安":
+            p["handicap"] = 36
+    for p in tampered["players"]:
+        if p["name"] == "黃予安":
+            p["gross"] = 111
+    return tampered_rules, tampered
+
+
+def test_manual_tie_order_resolves_deadlock(rules, match_input):
+    """總幹事裁定順序（manual_tie_order）→ 不阻斷，依裁定排序，獎項照算。"""
+    tampered_rules, tampered = _make_deadlock(rules, match_input)
+    tampered["manual_tie_order"] = ["曹勇良", "黃予安"]
+    result = score(tampered_rules, tampered)
+    assert "needs_manual_resolution" not in result
+    names = [r["name"] for r in result["net_ranking"]]
+    # 淨桿 75 兩人依裁定：曹勇良在前
+    assert names.index("曹勇良") < names.index("黃予安")
+    assert result["net_ranking"][names.index("曹勇良")]["net"] == 75
+    # 幸運分享獎依裁定後的排名計算（冠軍 71 單數 → 1,3,5,7）
+    lucky = result["awards"]["lucky_share"]["winners"]
+    assert lucky == [r["name"] for r in result["net_ranking"] if r["rank"] % 2 == 1]
+    # 反向裁定 → 順序跟著反
+    tampered["manual_tie_order"] = ["黃予安", "曹勇良"]
+    result2 = score(tampered_rules, tampered)
+    names2 = [r["name"] for r in result2["net_ranking"]]
+    assert names2.index("黃予安") < names2.index("曹勇良")
+
+
+def test_manual_tie_order_must_cover_both(rules, match_input):
+    """裁定名單沒涵蓋僵局雙方 → 仍阻斷，不得自行排序。"""
+    tampered_rules, tampered = _make_deadlock(rules, match_input)
+    tampered["manual_tie_order"] = ["曹勇良"]  # 只列一人
+    result = score(tampered_rules, tampered)
+    assert result["needs_manual_resolution"] is True
+
+
 def test_gross_champion_cascade(rules, match_input):
     """總桿冠軍年度已領過 → 連鎖順延至次低未領者。"""
     result = score(rules, match_input, prior_gross_winners={"王建亞", "陳淂笙"})

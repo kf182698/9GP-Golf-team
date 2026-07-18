@@ -172,11 +172,36 @@ OCR 是選配，手動輸入網格是必備。
      驗證未全過 exit code 1
    - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
 3. ✅ 兩支 Actions workflow 串接（2026-07-17 完成，見下）
-4. 🔶 PWA 前端 — admin.html 手動輸入路徑完成（2026-07-17，見下）；
-   後補：OCR 草稿預填、同分裁定介面、近洞獎輸入欄、manifest.json、
-   升級 index.html
+4. ✅ PWA 前端 — 全部完成（2026-07-17，第一回合手動路徑 + 第二回合閉環，見下）
 
-各階段可獨立驗收。
+各階段可獨立驗收。**系統開發完工**；僅剩實照片調校（見「待補資料」）。
+
+## 階段 4 第二回合實作決定（2026-07-17：日常操作閉環 + 門面）
+
+日常操作四步驟（上傳→校對→近洞獎/裁定→發布上網頁）全部閉環：
+
+- **manual_tie_order 契約**（引擎小改）：match_input 選用欄位
+  `manual_tie_order: ["甲","乙"]`（前者名次較前）。「淨桿與差點皆同」的
+  兩人皆在列才解僵局並附 tie_break「總幹事裁定」；未涵蓋雙方仍
+  needs_manual_resolution 阻斷——程式永不自行排序。
+- **同分裁定介面＝發布前本地預檢**：admin.html 進入⑤時以名冊差點算淨桿
+  找「淨桿同且差點同」群組，顯示裁定卡（列差點供判斷、依名次順序點選），
+  未裁定完發布鈕鎖定。裁定寫入確認稿，不必等 workflow 失敗才處理。
+- **照片上傳**：步驟①選配面板——多選照片 PUT `scorecards/<date>/<檔名>`
+  → dispatch ocr.yml(image_dir, card_type)。上傳後點「載入辨識草稿」
+  GET pending/<date>_draft.json 預填（比對 courses 帶球場；比對不到轉自訂）。
+- **色碼校對**（設計要求 6）：綠=該列驗證 pass、黃=low_confidence_holes、
+  紅=unreadable null 格；人工改格即清該格標記；總表顯示「校對 n 格」。
+  OCR 純預填，任何格可覆寫，無草稿不影響手 key 路徑。
+- **近洞獎**：⑤會員 chips 複選 → `manual_awards.near_pin`（list 或 null）。
+- **manifest.json**：start_url admin.html（總幹事工具加主畫面）；
+  index.html 維持一般網頁。
+- **index.html 升級**：新增「最新例賽快報」（載入即顯示排名/獎項，
+  來賓標示、請假不列）；走勢圖加差點 dataset（右軸、虛線 accent）。
+- **驗收證據**（Playwright 五場景）：手 key 黃金比對回歸、OCR 預填三色碼
+  與補格清標記、裁定卡阻斷→點序→引擎依裁定排序（串驗 scoring.py）、
+  上傳請求形狀（PUT scorecards + ocr dispatch payload）、index 快報列數
+  與雙 dataset。pytest 38 項全綠。
 
 ## 階段 4 實作決定（2026-07-17，第一回合：手動輸入路徑）
 
@@ -283,3 +308,7 @@ admin.html 需提供裁定介面（顯示雙方差點供判斷，總幹事指定
 
 - [ ] 補登其他常打球場的每洞 par（rules.yaml courses 區塊）
 - [ ] iSwing 是否提供匯出功能（若有，OCR 層可簡化為 fallback）
+- [ ] repo Settings → Secrets 加入 `ANTHROPIC_API_KEY`（ocr.yml 需要）
+- [ ] 確認 GitHub Pages 設定為 main branch 部署（score.yml push 後自動更新網頁）
+- [ ] **實照片調校**：拿實際 iSwing / 手寫成績卡跑 ocr.yml，調 prompt 至
+  欄位辨識率 > 90%（全系統唯一未驗收項）

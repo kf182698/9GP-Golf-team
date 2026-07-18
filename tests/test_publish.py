@@ -208,6 +208,27 @@ def test_blocking_tie_exits_2_and_writes_nothing(sandbox, capsys):
     assert rules_path.read_text(encoding="utf-8") == rules_before
 
 
+def test_manual_tie_order_publishes(sandbox):
+    """確認稿帶 manual_tie_order → 僵局解除、正常發布 exit 0。"""
+    rules_path, scores_path, input_path = sandbox
+    text = rules_path.read_text(encoding="utf-8")
+    rules_path.write_text(
+        text.replace('- { name: "黃予安", handicap: 32 }',
+                     '- { name: "黃予安", handicap: 36 }'),
+        encoding="utf-8")
+    data = json.loads(input_path.read_text(encoding="utf-8"))
+    for p in data["players"]:
+        if p["name"] == "黃予安":
+            p["gross"] = 111
+    data["manual_tie_order"] = ["黃予安", "曹勇良"]
+    input_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    assert run_publish(rules_path, scores_path, input_path) == 0
+    rows = json.loads(scores_path.read_text(encoding="utf-8"))
+    by_name = {r["球員姓名"]: r for r in rows}
+    assert by_name["黃予安"]["名次"] < by_name["曹勇良"]["名次"]
+
+
 def test_dry_run_writes_nothing(sandbox, capsys):
     rules_path, scores_path, input_path = sandbox
     rules_before = rules_path.read_text(encoding="utf-8")

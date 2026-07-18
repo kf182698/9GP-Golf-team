@@ -50,11 +50,19 @@ def classify_players(input_players, roster):
     return members, guests
 
 
-def rank_members(members, roster, tie_break_rules):
+def rank_members(members, roster, tie_break_rules, manual_tie_order=None):
     """依淨桿升冪排名，同分依差點少者優先；差點亦同則阻斷。
 
+    manual_tie_order 為總幹事裁定的姓名順序（前者名次較前）：
+    「淨桿與差點皆同」的兩人若皆在列即依此排序，否則仍阻斷
+    （程式不得自行排序或隨機決定）。
     回傳 net_ranking 列表（rank/name/gross/handicap/net，必要時附 tie_break 說明）。
     """
+    order = list(manual_tie_order or [])
+
+    def order_idx(name):
+        return order.index(name) if name in order else len(order)
+
     rows = []
     for p in members:
         hc = roster[p["name"]]
@@ -67,18 +75,23 @@ def rank_members(members, roster, tie_break_rules):
             }
         )
 
-    rows.sort(key=lambda r: (r["net"], r["handicap"]))
+    rows.sort(key=lambda r: (r["net"], r["handicap"], order_idx(r["name"])))
 
-    # 檢查阻斷性同分：淨桿與差點皆相同
+    # 檢查阻斷性同分：淨桿與差點皆相同且未經總幹事裁定
     for a, b in zip(rows, rows[1:]):
         if a["net"] == b["net"] and a["handicap"] == b["handicap"]:
+            if a["name"] in order and b["name"] in order:
+                a["manual"] = b["manual"] = True
+                continue
             raise TieBreakBlocked([a["name"], b["name"]], a["net"])
 
     ranking = []
     for i, r in enumerate(rows):
         row = {"rank": i + 1, "name": r["name"], "gross": r["gross"],
                "handicap": r["handicap"], "net": r["net"]}
-        # 同分以差點裁決者，附上說明（僅供閱讀，不參與比對）
+        # 同分裁決說明（僅供閱讀，不參與比對）
+        if r.get("manual"):
+            row["tie_break"] = "淨桿與差點皆同，順序由總幹事裁定"
         for other in rows:
             if other is not r and other["net"] == r["net"] and r["handicap"] < other["handicap"]:
                 row["tie_break"] = (
@@ -220,7 +233,8 @@ def score(rules, match_input, prior_gross_winners=None):
     members, guests = classify_players(match_input["players"], roster)
 
     try:
-        ranking = rank_members(members, roster, rules.get("tie_break", {}))
+        ranking = rank_members(members, roster, rules.get("tie_break", {}),
+                               manual_tie_order=match_input.get("manual_tie_order"))
     except TieBreakBlocked as e:
         # 幸運分享獎依排名單雙發獎，順序未定則得獎名單不定 → 阻斷獎項計算
         return {
