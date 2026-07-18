@@ -172,9 +172,34 @@ OCR 是選配，手動輸入網格是必備。
      驗證未全過 exit code 1
    - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
 3. ✅ 兩支 Actions workflow 串接（2026-07-17 完成，見下）
-4. PWA 前端（admin.html + 升級 index.html）
+4. 🔶 PWA 前端 — admin.html 手動輸入路徑完成（2026-07-17，見下）；
+   後補：OCR 草稿預填、同分裁定介面、近洞獎輸入欄、manifest.json、
+   升級 index.html
 
 各階段可獨立驗收。
+
+## 階段 4 實作決定（2026-07-17，第一回合：手動輸入路徑）
+
+`admin.html` 單檔（無建置流程），實現「完全沒有 OCR 也能手 key 完成整場」：
+
+- **設定來源**：fetch 同源 `rules.yaml` + js-yaml CDN 解析——名冊與球場
+  不 hardcode 於前端。視覺沿用 index.html（Tailwind CDN、primary/accent）。
+- **五步驟精靈**：①場次（球場下拉自動帶 hole_pars；「其他球場」手動 par，
+  新球場不卡死）→ ②名單（會員按鈕勾選 + 來賓輸入）→ ③單人逐洞
+  （大鍵盤 1-9 單鍵即進即跳洞、10+ 兩位數、「照par」、⌫；18 格膠囊列
+  可點跳任一洞；前九/後九/總桿即時小計；18 洞完自動跳下一位未完成者）
+  → ④總表（紅底=未填，點列跳回補）→ ⑤發布。
+- **草稿**：每格輸入即寫 localStorage `gp9_draft`；重開頁偵測草稿詢問續作。
+- **發布**：組確認稿 JSON（totals/vs_par 自動計算、`validation: "pass"`、
+  `manual_awards.near_pin: null`，與引擎 input 完全同構）→
+  GitHub Contents API PUT `pending/<date>_confirmed.json`（已存在帶 sha 更新）
+  → dispatch `score.yml`。PAT 存 localStorage `gp9_pat`（⚙ 設定面板），
+  金鑰不進 repo。「下載 JSON」為無 PAT 備援。
+- **驗收證據**（Playwright 行動 viewport 端到端，腳本不進 repo）：
+  模擬 key 完 fixture 11 人 → 產出 JSON 與 fixture input 全欄位一致 →
+  直接餵 scoring.py 重現 expected 結果；reload 草稿 198 格不丟；
+  發布請求形狀（PUT + dispatch payload）正確。11 人共 198 次點擊
+  （每人 18 點、單鍵自動跳洞），估算 ≈5 分鐘 < 10 分鐘驗收線。
 
 ## 階段 3 實作決定（2026-07-17）
 
