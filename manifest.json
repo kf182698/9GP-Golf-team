@@ -1,0 +1,14 @@
+{
+  "name": "9GP球隊 成績登錄",
+  "short_name": "9GP登錄",
+  "description": "9GP 高爾夫球隊總幹事成績登錄工具",
+  "start_url": "./admin.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f4f6",
+  "theme_color": "#182E4A",
+  "icons": [
+    { "src": "./logo.png", "sizes": "any", "type": "image/png", "purpose": "any" }
+  ]
+}

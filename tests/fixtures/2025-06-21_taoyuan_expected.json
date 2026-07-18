@@ -1,0 +1,128 @@
+{
+  "note": "差點採 2026-05-22 現值，為機械驗算而非還原 2025 年真實結果。用於驗證 scoring.py 邏輯。",
+  "excluded_guests": [
+    "吳俊癸",
+    "陳紫晴",
+    "鄭家驊"
+  ],
+  "net_ranking": [
+    {
+      "rank": 1,
+      "name": "陳淂笙",
+      "gross": 87,
+      "handicap": 16,
+      "net": 71
+    },
+    {
+      "rank": 2,
+      "name": "陳奕仲",
+      "gross": 92,
+      "handicap": 20,
+      "net": 72
+    },
+    {
+      "rank": 3,
+      "name": "王建亞",
+      "gross": 86,
+      "handicap": 12,
+      "net": 74,
+      "tie_break": "與陳彥宇淨桿同為74，差點少者優先"
+    },
+    {
+      "rank": 4,
+      "name": "陳彥宇",
+      "gross": 107,
+      "handicap": 33,
+      "net": 74
+    },
+    {
+      "rank": 5,
+      "name": "洪榮杰",
+      "gross": 105,
+      "handicap": 30,
+      "net": 75,
+      "tie_break": "與曹勇良淨桿同為75，差點少者優先"
+    },
+    {
+      "rank": 6,
+      "name": "曹勇良",
+      "gross": 111,
+      "handicap": 36,
+      "net": 75
+    },
+    {
+      "rank": 7,
+      "name": "黃予安",
+      "gross": 111,
+      "handicap": 32,
+      "net": 79
+    },
+    {
+      "rank": 8,
+      "name": "賀錫敬",
+      "gross": 99,
+      "handicap": 19,
+      "net": 80
+    }
+  ],
+  "awards": {
+    "gross_champion": {
+      "winner": "王建亞",
+      "gross": 86,
+      "prize": "cash 500",
+      "note": "須檢查年度是否已領取，已領則連鎖順延"
+    },
+    "net_champion": {
+      "winner": "陳淂笙",
+      "net": 71,
+      "prize": "ball x1"
+    },
+    "lucky_share": {
+      "parity_basis": 71,
+      "parity": "odd",
+      "winners": [
+        "陳淂笙",
+        "王建亞",
+        "洪榮杰",
+        "黃予安"
+      ],
+      "prize_each": 200,
+      "note": "淨桿冠軍淨桿 71 為單數 → 淨桿排名 1,3,5,7 得獎"
+    },
+    "eagle": {
+      "winners": [],
+      "note": "8 位會員 x18 洞逐格比對，無任何洞低於該洞 par 2 桿"
+    },
+    "near_pin": {
+      "winner": null,
+      "note": "待 admin 手動輸入"
+    }
+  },
+  "handicap_adjustment": [
+    {
+      "name": "陳淂笙",
+      "net_rank": 1,
+      "before": 16,
+      "bracket": "11~20",
+      "delta": -2,
+      "after": 14
+    },
+    {
+      "name": "陳奕仲",
+      "net_rank": 2,
+      "before": 20,
+      "bracket": "11~20",
+      "delta": -1,
+      "after": 19
+    },
+    {
+      "name": "王建亞",
+      "net_rank": 3,
+      "before": 12,
+      "bracket": "11~20",
+      "delta": 0,
+      "after": 12,
+      "note": "關鍵測試點：11~20 區間季軍欄為空 → 拿到淨桿季軍但不扣差點"
+    }
+  ]
+}

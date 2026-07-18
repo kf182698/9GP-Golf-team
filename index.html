@@ -45,6 +45,24 @@
 
     <div id="statusMessage" class="max-w-5xl mx-auto mt-4 px-4 text-center text-accent font-bold hidden"></div>
 
+    <!-- 最新例賽快報：載入即顯示，不必先選球員 -->
+    <section id="latestMatch" class="max-w-5xl mx-auto mt-6 px-4 hidden">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <div class="bg-primary text-white px-4 py-3 flex justify-between items-center">
+                <h2 class="font-bold">🏌️ 最新例賽　<span id="latestTitle" class="font-normal text-white/80 text-sm"></span></h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-500">
+                        <tr><th class="p-2">名次</th><th class="p-2 text-left">球員</th>
+                        <th class="p-2">總桿</th><th class="p-2">淨桿</th><th class="p-2 text-left">獎項</th></tr>
+                    </thead>
+                    <tbody id="latestRows"></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
     <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden relative z-10">
         
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
@@ -68,7 +86,7 @@
 
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-white p-4 rounded-xl shadow md:col-span-2">
-                <h2 class="text-lg font-bold text-primary mb-4">總桿數歷史走勢</h2>
+                <h2 class="text-lg font-bold text-primary mb-4">總桿與差點走勢</h2>
                 <canvas id="scoreChart" height="100"></canvas>
             </div>
             <div class="bg-white p-4 rounded-xl shadow">
@@ -127,6 +145,7 @@
 
                 golfData = await response.json();
                 updateLastUpdatedDate();
+                renderLatestMatch();  // 最新例賽快報（不必先選球員）
                 initCustomSelect(); // 資料讀取成功，初始化選單
 
             } catch (error) {
@@ -231,6 +250,30 @@
             renderHistoryCards([...playerData].reverse());
         }
 
+        // 最新例賽快報：排名表（來賓標示、請假不列）
+        function renderLatestMatch() {
+            if (!golfData.length) return;
+            const latestDate = golfData.map(d => d['賽事日期']).sort().at(-1);
+            const rows = golfData
+                .filter(d => d['賽事日期'] === latestDate && d['名次'] !== '請假')
+                .sort((a, b) => {
+                    const ra = a['名次'], rb = b['名次'];
+                    if (typeof ra === 'number' && typeof rb === 'number') return ra - rb;
+                    return (typeof ra === 'number') ? -1 : 1;  // 來賓排最後
+                });
+            document.getElementById('latestTitle').textContent =
+                rows[0] ? rows[0]['例賽名稱'] : latestDate;
+            document.getElementById('latestRows').innerHTML = rows.map(d => `
+                <tr class="border-t ${d['名次'] === 1 ? 'bg-orange-50' : ''}">
+                    <td class="p-2 text-center font-bold ${typeof d['名次'] === 'number' ? 'text-primary' : 'text-gray-400 text-xs'}">${d['名次']}</td>
+                    <td class="p-2 font-semibold">${d['球員姓名']}</td>
+                    <td class="p-2 text-center font-mono">${d['總桿數'] ?? '—'}</td>
+                    <td class="p-2 text-center font-mono">${d['淨桿數'] ?? '—'}</td>
+                    <td class="p-2 text-sm text-accent">${d['所獲獎項'] ?? ''}</td>
+                </tr>`).join('');
+            document.getElementById('latestMatch').classList.remove('hidden');
+        }
+
         // 繪製走勢圖
         function renderChart(data) {
             const ctx = document.getElementById('scoreChart').getContext('2d');
@@ -252,7 +295,19 @@
                         pointRadius: 4,
                         pointBackgroundColor: '#AE320B',
                         spanGaps: false,
-                        tension: 0.3
+                        tension: 0.3,
+                        yAxisID: 'y'
+                    }, {
+                        label: '差點',
+                        data: data.map(d => d['差點']),
+                        borderColor: '#AE320B',
+                        backgroundColor: '#AE320B',
+                        borderWidth: 2,
+                        borderDash: [6, 4],
+                        pointRadius: 3,
+                        spanGaps: true,
+                        tension: 0.3,
+                        yAxisID: 'y2'
                     }]
                 },
                 options: {
@@ -261,10 +316,15 @@
                         y: {
                             reverse: true,
                             title: { display: true, text: '總桿數' }
+                        },
+                        y2: {
+                            position: 'right',
+                            grid: { drawOnChartArea: false },
+                            title: { display: true, text: '差點' }
                         }
                     },
                     plugins: {
-                        legend: { display: false }
+                        legend: { display: true, position: 'bottom' }
                     }
                 }
             });

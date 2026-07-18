@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>9GP球隊 成績登錄（總幹事）</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#182E4A">
+<link rel="apple-touch-icon" href="./logo.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js-yaml.min.js"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  primary: '#182E4A',  /* 與 index.html 一致 */
+  accent: '#AE320B',
+}}}};
+</script>
+<style>
+  body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  .key { user-select: none; }
+  .key:active { transform: scale(0.94); filter: brightness(0.92); }
+</style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800 pb-28">
+
+<header class="bg-primary text-white px-4 py-3 shadow-md sticky top-0 z-40">
+  <div class="max-w-xl mx-auto flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <img src="./logo.png" alt="logo" class="w-9 h-9 rounded-full bg-white object-contain">
+      <div>
+        <h1 class="font-bold tracking-wide leading-tight">成績登錄</h1>
+        <div id="stepLabel" class="text-xs text-white/70">載入設定中…</div>
+      </div>
+    </div>
+    <button id="patBtn" class="text-xl px-2" title="GitHub 設定">⚙️</button>
+  </div>
+  <div class="max-w-xl mx-auto mt-2 flex gap-1" id="stepDots"></div>
+</header>
+
+<main class="max-w-xl mx-auto px-3 mt-4" id="app">
+  <div id="loading" class="text-center text-gray-500 py-16">讀取 rules.yaml…</div>
+</main>
+
+<!-- PAT 設定 modal -->
+<div id="patModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-3">
+  <div class="bg-white rounded-2xl p-5 w-full max-w-md shadow-xl">
+    <h2 class="font-bold text-primary text-lg mb-2">GitHub 發布設定</h2>
+    <p class="text-sm text-gray-500 mb-3 leading-relaxed">
+      貼入 fine-grained PAT（需此 repo 的 Contents 與 Actions 讀寫權限）。
+      金鑰只存於此手機瀏覽器 localStorage，不會寫入任何檔案。
+    </p>
+    <input id="patInput" type="password" placeholder="github_pat_…"
+           class="w-full border rounded-lg p-3 text-sm mb-3" autocomplete="off">
+    <div class="flex gap-2">
+      <button id="patSave" class="flex-1 bg-primary text-white rounded-lg py-2.5 font-semibold">儲存</button>
+      <button id="patClear" class="px-4 border rounded-lg text-gray-500">清除</button>
+      <button id="patClose" class="px-4 border rounded-lg text-gray-500">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const REPO = "kf182698/9GP-Golf-team";
+const BRANCH = "main";
+const DRAFT_KEY = "gp9_draft";
+const PAT_KEY = "gp9_pat";
+const STEPS = ["場次設定", "出賽名單", "逐洞輸入", "總表檢視", "發布"];
+
+let rules = null;          // rules.yaml 解析結果（唯一規則來源）
+let S = null;              // 全部輸入狀態（每次變更即寫 localStorage）
+let tensMode = false;      // 鍵盤 10+ 兩位數模式
+
+const $ = (id) => document.getElementById(id);
+const app = () => $("app");
+
+function newState() {
+  return {
+    step: 1,
+    date: new Date().toISOString().slice(0, 10),
+    courseId: "", courseName: "", coursePar: null,
+    holePars: Array(18).fill(4),
+    nineNames: ["前九", "後九"],
+    cardType: "iswing",
+    provider: "anthropic",
+    players: [],               // {name, is_guest, scores:[18], ocr:{validation,low:[],unread:[]}}
+    cur: { p: 0, h: 0 },
+    nearPin: [],               // 近洞獎得主（手動輸入，程式無法計算）
+    manualTieOrder: [],        // 同分裁定順序（總幹事指定）
+  };
+}
+
+function save() { localStorage.setItem(DRAFT_KEY, JSON.stringify(S)); }
+
+// ------------------ 啟動：讀 rules.yaml + 草稿續作 ------------------
+
+async function boot() {
+  try {
+    const res = await fetch("rules.yaml", { cache: "no-store" });
+    if (!res.ok) throw new Error(res.status);
+    rules = jsyaml.load(await res.text());
+  } catch (e) {
+    $("loading").innerHTML =
+      `<span class="text-accent font-bold">讀取 rules.yaml 失敗（${e}）</span><br>
+       <span class="text-sm">請確認與 admin.html 同目錄部署。</span>`;
+    return;
+  }
+  const draft = localStorage.getItem(DRAFT_KEY);
+  if (draft) {
+    try {
+      const d = JSON.parse(draft);
+      const filled = d.players?.reduce((n, p) => n + p.scores.filter(v => v != null).length, 0) || 0;
+      if (filled > 0 || d.step > 1) {
+        if (confirm(`偵測到 ${d.date} 的未完成草稿（已填 ${filled} 格）。\n要繼續上次的登錄嗎？\n（取消＝捨棄草稿重新開始）`)) {
+          S = d;
+        } else { localStorage.removeItem(DRAFT_KEY); }
+      }
+    } catch (_) { /* 壞草稿直接忽略 */ }
+  }
+  if (!S) S = newState();
+  render();
+}
+
+// ------------------ 共用 render ------------------
+
+function render() {
+  save();
+  $("stepLabel").textContent = `步驟 ${S.step}/5：${STEPS[S.step - 1]}`;
+  $("stepDots").innerHTML = STEPS.map((_, i) =>
+    `<div class="h-1 flex-1 rounded ${i < S.step ? "bg-white" : "bg-white/25"}"></div>`).join("");
+  [renderStep1, renderStep2, renderStep3, renderStep4, renderStep5][S.step - 1]();
+  window.scrollTo(0, 0);
+}
+
+function navBtns(prevOk, nextOk, nextLabel = "下一步") {
+  return `<div class="fixed bottom-0 left-0 right-0 bg-white border-t p-3 z-30">
+    <div class="max-w-xl mx-auto flex gap-2">
+      ${prevOk ? `<button onclick="S.step--;render()" class="px-5 py-3 border rounded-xl text-gray-600 font-semibold">上一步</button>` : ""}
+      <button onclick="nextStep()" ${nextOk ? "" : "disabled"}
+        class="flex-1 py-3 rounded-xl font-bold text-white ${nextOk ? "bg-primary" : "bg-gray-300"}">${nextLabel}</button>
+    </div></div>`;
+}
+
+function nextStep() { S.step++; render(); }
+
+// ------------------ ① 場次設定 ------------------
+
+function renderStep1() {
+  const opts = (rules.courses || []).map(c =>
+    `<option value="${c.id}" ${S.courseId === c.id ? "selected" : ""}>${c.name}（par ${c.par_total}）</option>`).join("");
+  const isCustom = S.courseId === "custom";
+  app().innerHTML = `
+  <div class="bg-white rounded-xl shadow p-4 space-y-4">
+    <div>
+      <label class="text-sm font-semibold text-gray-600">比賽日期</label>
+      <input type="date" id="fDate" value="${S.date}" class="w-full border rounded-lg p-3 mt-1">
+    </div>
+    <div>
+      <label class="text-sm font-semibold text-gray-600">球場</label>
+      <select id="fCourse" class="w-full border rounded-lg p-3 mt-1 bg-white">
+        <option value="">— 請選擇 —</option>${opts}
+        <option value="custom" ${isCustom ? "selected" : ""}>其他球場（手動輸入）</option>
+      </select>
+    </div>
+    <div id="customArea" class="${isCustom ? "" : "hidden"} space-y-3">
+      <input id="fCourseName" placeholder="球場名稱" value="${isCustom ? S.courseName : ""}"
+             class="w-full border rounded-lg p-3">
+      <div class="grid grid-cols-2 gap-2">
+        <input id="fNine1" placeholder="前九名稱（如 西）" value="${S.nineNames[0]}" class="border rounded-lg p-3">
+        <input id="fNine2" placeholder="後九名稱（如 東）" value="${S.nineNames[1]}" class="border rounded-lg p-3">
+      </div>
+      <label class="text-sm font-semibold text-gray-600">每洞標準桿（新球場第一次打完後補登 rules.yaml）</label>
+      <div class="grid grid-cols-9 gap-1">${S.holePars.map((p, i) =>
+        `<input type="number" min="3" max="6" value="${p}" data-hole="${i}"
+           class="parIn border rounded p-1 text-center text-sm">`).join("")}</div>
+      <div class="text-sm text-gray-500">合計 par：<span id="parSum" class="font-bold">${S.holePars.reduce((a, b) => a + b, 0)}</span></div>
+    </div>
+    <div id="courseInfo" class="text-sm text-gray-500"></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow p-4 mt-4 space-y-3">
+    <h2 class="font-bold text-primary">📷 成績卡辨識（選用——沒有照片也能直接下一步手動輸入）</h2>
+    <div class="flex gap-2 items-center">
+      <select id="fCardType" class="border rounded-lg p-2 bg-white text-sm">
+        <option value="iswing" ${S.cardType === "iswing" ? "selected" : ""}>iSwing 列印卡</option>
+        <option value="handwritten" ${S.cardType === "handwritten" ? "selected" : ""}>手寫卡</option>
+      </select>
+      <select id="fProvider" class="border rounded-lg p-2 bg-white text-sm">
+        <option value="anthropic" ${S.provider === "anthropic" ? "selected" : ""}>Anthropic</option>
+        <option value="openai" ${S.provider === "openai" ? "selected" : ""}>OpenAI</option>
+        <option value="gemini" ${S.provider === "gemini" ? "selected" : ""}>Gemini</option>
+      </select>
+    </div>
+    <div class="flex gap-2 items-center">
+      <input id="photoIn" type="file" accept="image/*" multiple class="hidden">
+      <button id="photoBtn" class="flex-1 border border-primary text-primary rounded-lg py-2 font-semibold text-sm">選照片並上傳辨識</button>
+    </div>
+    <button id="draftBtn" class="w-full bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700">⬇ 載入辨識草稿（pending/${S.date}_draft.json）</button>
+    <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
+  </div>
+  ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
+
+  $("fDate").onchange = e => { S.date = e.target.value; save(); };
+  $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
+  if (isCustom) {
+    $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
+    $("fCourseName").onchange = () => render();   // 失焦後重繪以更新下一步按鈕
+    $("fNine1").oninput = e => { S.nineNames[0] = e.target.value.trim() || "前九"; save(); };
+    $("fNine2").oninput = e => { S.nineNames[1] = e.target.value.trim() || "後九"; save(); };
+    document.querySelectorAll(".parIn").forEach(inp => inp.oninput = e => {
+      const v = parseInt(e.target.value); const i = +e.target.dataset.hole;
+      if (v >= 3 && v <= 6) S.holePars[i] = v;
+      S.coursePar = S.holePars.reduce((a, b) => a + b, 0);
+      $("parSum").textContent = S.coursePar; save();
+    });
+  } else if (S.courseId) {
+    $("courseInfo").innerHTML =
+      `區域：${S.nineNames[0]} / ${S.nineNames[1]}　·　每洞 par 已自動帶入，輸入時可一鍵「照par」`;
+  }
+  $("fCardType").onchange = e => { S.cardType = e.target.value; save(); };
+  $("fProvider").onchange = e => { S.provider = e.target.value; save(); };
+  $("photoBtn").onclick = () => {
+    if (!localStorage.getItem(PAT_KEY)) return openPat();
+    $("photoIn").click();
+  };
+  $("photoIn").onchange = e => uploadPhotos([...e.target.files]);
+  $("draftBtn").onclick = loadDraft;
+}
+
+// ------------------ 照片上傳 → 觸發辨識 workflow ------------------
+
+async function uploadPhotos(files) {
+  const log = m => { $("ocrLog").textContent += m + "\n"; };
+  if (!files.length) return;
+  $("ocrLog").textContent = "";
+  const dir = `scorecards/${S.date}`;
+  try {
+    for (const f of files) {
+      log(`上傳 ${f.name}…`);
+      const b64 = await new Promise((ok, err) => {
+        const r = new FileReader();
+        r.onload = () => ok(r.result.split(",")[1]);
+        r.onerror = err;
+        r.readAsDataURL(f);
+      });
+      const path = `${dir}/${f.name}`;
+      let sha;
+      const head = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
+      if (head.ok) sha = (await head.json()).sha;
+      const put = await ghFetch(`/repos/${REPO}/contents/${path}`, {
+        method: "PUT",
+        body: JSON.stringify({ message: `photo: ${path}`, content: b64,
+                               branch: BRANCH, ...(sha ? { sha } : {}) }),
+      });
+      if (!put.ok) throw new Error(`上傳失敗 HTTP ${put.status}`);
+    }
+    log("觸發辨識 workflow…");
+    const disp = await ghFetch(`/repos/${REPO}/actions/workflows/ocr.yml/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({ ref: BRANCH,
+        inputs: { image_dir: dir, card_type: S.cardType, provider: S.provider } }),
+    });
+    if (disp.status !== 204) throw new Error(`dispatch 失敗 HTTP ${disp.status}`);
+    log(`✓ 辨識中（約 1-2 分鐘）。完成後點「載入辨識草稿」預填格子。\n進度：https://github.com/${REPO}/actions`);
+  } catch (e) { log(`❌ ${e.message}`); }
+}
+
+// ------------------ 載入 OCR 草稿 → 預填 + 色碼 ------------------
+
+async function loadDraft() {
+  const log = m => { $("ocrLog").textContent += m + "\n"; };
+  $("ocrLog").textContent = "";
+  if (!localStorage.getItem(PAT_KEY)) return openPat();
+  try {
+    const path = `pending/${S.date}_draft.json`;
+    const res = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
+    if (!res.ok) throw new Error(`找不到 ${path}（HTTP ${res.status}）——辨識可能尚未完成`);
+    const body = await res.json();
+    const draft = JSON.parse(decodeURIComponent(escape(atob(body.content.replace(/\n/g, "")))));
+    applyDraft(draft);
+    render();   // 先重繪（會清掉 #ocrLog），再寫結果訊息
+    log(`✓ 已預填 ${draft.players.length} 位球員。黃格=低信心、紅格=無法辨識，請逐格校對；任何格都可覆寫。`);
+  } catch (e) { log(`❌ ${e.message}`); }
+}
+
+// 半場桿數強制補齊/截斷至剛好 9 格（OCR 漏辨識或格式異常時，
+// 逐洞輸入介面才不會漏掉球洞）
+function nineCells(arr) {
+  const a = Array.isArray(arr) ? arr : [];
+  return Array.from({ length: 9 }, (_, i) => (a[i] === undefined ? null : a[i]));
+}
+
+function applyDraft(draft) {
+  if (draft.date) S.date = draft.date;
+  // 球場：比對 courses 名稱；比對不到 → 自訂（帶草稿的 hole_pars）
+  const c = (rules.courses || []).find(c =>
+    c.name === draft.course || (c.aliases || []).includes(draft.course));
+  if (c) { applyCourse(c.id); }
+  else {
+    S.courseId = "custom";
+    S.courseName = draft.course || "";
+    S.holePars = (draft.hole_pars || Array(18).fill(4)).map(p => p ?? 4);
+    S.nineNames = [draft.front_nine_name || "前九", draft.back_nine_name || "後九"];
+    S.coursePar = draft.course_par ?? S.holePars.reduce((a, b) => a + b, 0);
+  }
+  S.players = (draft.players || []).map(p => ({
+    name: p.name,
+    is_guest: !!p.is_guest,
+    scores: [...nineCells(p.front_9), ...nineCells(p.back_9)],  // 保證 18 格
+    ocr: {
+      validation: p.validation || "fail",
+      low: (p.low_confidence_holes || []).map(h => h - 1),      // 轉 0-based
+      unread: (p.unreadable_holes || []).map(h => h - 1),
+    },
+  }));
+  S.cur = { p: 0, h: 0 };
+}
+function applyCourse(id) {
+  S.courseId = id;
+  if (id === "custom") {
+    S.courseName = ""; S.holePars = Array(18).fill(4);
+    S.nineNames = ["前九", "後九"]; S.coursePar = 72;
+    return;
+  }
+  const c = (rules.courses || []).find(c => c.id === id);
+  if (!c) { S.courseName = ""; return; }
+  S.courseName = c.name;
+  S.nineNames = c.nines.map(n => n.name);
+  S.holePars = [...c.nines[0].pars, ...c.nines[1].pars];
+  S.coursePar = c.par_total;
+}
+
+// ------------------ ② 出賽名單 ------------------
+
+function renderStep2() {
+  const roster = (rules.players || []).map(p => p.name);
+  const chosen = S.players.map(p => p.name);
+  app().innerHTML = `
+  <div class="bg-white rounded-xl shadow p-4">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="font-bold text-primary">勾選出賽會員</h2>
+      <span class="text-sm text-gray-500">已選 <b id="cnt">${S.players.length}</b> 人</span>
+    </div>
+    <div class="grid grid-cols-3 gap-2">${roster.map(n => `
+      <button data-name="${n}" class="mem key py-3 rounded-xl border text-sm font-semibold
+        ${chosen.includes(n) ? "bg-primary text-white border-primary" : "bg-gray-50 text-gray-700"}">${n}</button>`).join("")}
+    </div>
+    <div class="mt-5">
+      <h2 class="font-bold text-primary mb-2">來賓（章程允許與賽，不列入排名）</h2>
+      <div class="flex gap-2">
+        <input id="guestName" placeholder="來賓姓名" class="flex-1 border rounded-lg p-3">
+        <button id="guestAdd" class="px-4 bg-accent text-white rounded-lg font-bold">＋加入</button>
+      </div>
+      <div id="guestList" class="flex flex-wrap gap-2 mt-3">${S.players.filter(p => p.is_guest).map(g => `
+        <span class="bg-orange-50 text-accent border border-accent/40 rounded-full px-3 py-1 text-sm">
+          ${g.name} <button data-g="${g.name}" class="gdel font-bold ml-1">×</button></span>`).join("")}
+      </div>
+    </div>
+  </div>
+  ${navBtns(true, S.players.length > 0, `開始輸入（${S.players.length} 人）`)}`;
+
+  document.querySelectorAll(".mem").forEach(b => b.onclick = () => {
+    const n = b.dataset.name;
+    const i = S.players.findIndex(p => p.name === n);
+    if (i >= 0) {
+      const filled = S.players[i].scores.some(v => v != null);
+      if (filled && !confirm(`${n} 已有輸入成績，確定移除？`)) return;
+      S.players.splice(i, 1);
+    } else {
+      S.players.push({ name: n, is_guest: false, scores: Array(18).fill(null) });
+    }
+    render();
+  });
+  $("guestAdd").onclick = () => {
+    const n = $("guestName").value.trim();
+    if (!n) return;
+    if (S.players.some(p => p.name === n)) { alert("名單已有同名"); return; }
+    S.players.push({ name: n, is_guest: true, scores: Array(18).fill(null) });
+    render();
+  };
+  document.querySelectorAll(".gdel").forEach(b => b.onclick = () => {
+    S.players = S.players.filter(p => p.name !== b.dataset.g);
+    render();
+  });
+}
+
+// ------------------ ③ 單人逐洞輸入 ------------------
+
+const sum = arr => arr.some(v => v == null) ? null : arr.reduce((a, b) => a + b, 0);
+const partial = arr => arr.reduce((a, b) => a + (b ?? 0), 0);
+
+function renderStep3() {
+  if (!S.players.length) { S.step = 2; return render(); }
+  S.cur.p = Math.min(S.cur.p, S.players.length - 1);
+  const P = S.players[S.cur.p];
+  const h = S.cur.h;
+  const front = P.scores.slice(0, 9), back = P.scores.slice(9);
+  const done = P.scores.filter(v => v != null).length;
+
+  // 色碼（設計要求 6）：綠=OCR 驗證通過、黃=低信心待校對、紅=無法辨識待補
+  const ocr = P.ocr;
+  const cellColor = (v, i) => {
+    if (ocr) {
+      if (v == null && ocr.unread.includes(i)) return "bg-red-200 text-accent border-accent";
+      if (v != null && ocr.low.includes(i)) return "bg-yellow-300 text-gray-900";
+      if (v != null && ocr.validation === "pass") return "bg-green-600 text-white";
+    }
+    return v == null ? "bg-gray-100 text-gray-400" : "bg-primary text-white";
+  };
+  const pill = (v, i) => `
+    <button data-h="${i}" class="cell key shrink-0 w-9 h-11 rounded-lg text-sm font-bold border
+      ${i === h ? "border-accent ring-2 ring-accent/40 " : "border-gray-200 "}
+      ${cellColor(v, i)}">${v ?? (i + 1)}</button>`;
+
+  app().innerHTML = `
+  <div class="bg-white rounded-xl shadow p-3">
+    <div class="flex items-center justify-between gap-2">
+      <select id="pSel" class="font-bold text-primary text-lg bg-transparent max-w-[45%]">
+        ${S.players.map((p, i) => `<option value="${i}" ${i === S.cur.p ? "selected" : ""}>
+          ${p.name}${p.is_guest ? "（賓）" : ""} ${p.scores.every(v => v != null) ? "✓" : ""}</option>`).join("")}
+      </select>
+      <div class="text-right text-sm leading-tight">
+        <div class="text-gray-500">進度 <b class="text-primary">${done}</b>/18</div>
+        <div class="font-mono">
+          <span class="text-gray-500">${S.nineNames[0]}</span> <b>${sum(front) ?? partial(front) + "…"}</b>
+          <span class="text-gray-500 ml-1">${S.nineNames[1]}</span> <b>${sum(back) ?? partial(back) + "…"}</b>
+          <span class="text-accent font-bold ml-1">Σ${sum(P.scores) ?? partial(P.scores) + "…"}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3 flex gap-1 overflow-x-auto pb-1">
+      ${front.map((v, i) => pill(v, i)).join("")}
+      <div class="shrink-0 w-px bg-gray-300 mx-1"></div>
+      ${back.map((v, i) => pill(v, i + 9)).join("")}
+    </div>
+
+    <div class="text-center my-3">
+      <span class="text-4xl font-black text-primary">第 ${h + 1} 洞</span>
+      <span class="text-2xl text-gray-400 font-bold ml-2">par ${S.holePars[h]}</span>
+      ${P.scores[h] != null ? `<span class="text-2xl text-accent font-bold ml-2">＝${P.scores[h]}</span>` : ""}
+    </div>
+
+    <div id="keypad" class="grid grid-cols-4 gap-2">${tensMode
+      ? [10, 11, 12, 13, 14, 15].map(n =>
+          `<button data-v="${n}" class="kv key bg-primary text-white text-2xl font-bold rounded-xl py-4">${n}</button>`).join("") +
+        `<button id="tensCancel" class="key col-span-2 bg-gray-200 rounded-xl py-4 font-bold text-gray-600">取消</button>`
+      : [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n =>
+          `<button data-v="${n}" class="kv key text-2xl font-bold rounded-xl py-4
+             ${n === S.holePars[h] ? "bg-accent text-white" : "bg-gray-800 text-white"}">${n}</button>`).join("") +
+        `<button id="tens" class="key bg-gray-500 text-white rounded-xl py-4 font-bold">10+</button>
+         <button id="parKey" class="key col-span-2 bg-primary text-white rounded-xl py-4 font-bold text-lg">照 par（${S.holePars[h]}）</button>
+         <button id="bsKey" class="key bg-gray-200 text-gray-600 rounded-xl py-4 font-bold text-xl">⌫</button>`}
+    </div>
+    <p class="text-xs text-gray-400 text-center mt-2">單鍵輸入後自動跳下一洞；點上方格子可跳任一洞修改</p>
+  </div>
+  ${navBtns(true, true, "檢視總表")}`;
+
+  $("pSel").onchange = e => { S.cur.p = +e.target.value; S.cur.h = firstEmpty(S.players[S.cur.p]); tensMode = false; render(); };
+  document.querySelectorAll(".cell").forEach(b => b.onclick = () => { S.cur.h = +b.dataset.h; tensMode = false; render(); });
+  document.querySelectorAll(".kv").forEach(b => b.onclick = () => setScore(+b.dataset.v));
+  if (tensMode) { $("tensCancel").onclick = () => { tensMode = false; render(); }; }
+  else {
+    $("tens").onclick = () => { tensMode = true; render(); };
+    $("parKey").onclick = () => setScore(S.holePars[S.cur.h]);
+    $("bsKey").onclick = () => {
+      const P = S.players[S.cur.p];
+      P.scores[S.cur.h] = null;
+      clearOcrFlag(P, S.cur.h);
+      render();
+    };
+  }
+}
+
+function firstEmpty(P) {
+  const i = P.scores.findIndex(v => v == null);
+  return i < 0 ? 0 : i;
+}
+
+function clearOcrFlag(P, h) {
+  // 總幹事人工校對過的格子即脫離黃/紅標記
+  if (P.ocr) {
+    P.ocr.low = P.ocr.low.filter(x => x !== h);
+    P.ocr.unread = P.ocr.unread.filter(x => x !== h);
+  }
+}
+
+function setScore(v) {
+  const P = S.players[S.cur.p];
+  P.scores[S.cur.h] = v;
+  clearOcrFlag(P, S.cur.h);
+  tensMode = false;
+  if (S.cur.h < 17) {
+    S.cur.h++;
+  } else if (P.scores.every(x => x != null)) {
+    // 18 洞填完 → 自動跳下一位未完成球員
+    const nxt = S.players.findIndex(p => !p.scores.every(x => x != null));
+    if (nxt >= 0) { S.cur.p = nxt; S.cur.h = firstEmpty(S.players[nxt]); }
+    else { S.step = 4; }   // 全員完成 → 總表
+  }
+  render();
+}
+
+// ------------------ ④ 總表檢視 ------------------
+
+function renderStep4() {
+  const rows = S.players.map((p, i) => {
+    const done = p.scores.filter(v => v != null).length;
+    const ok = done === 18;
+    const pending = p.ocr ? p.ocr.low.length + p.ocr.unread.length : 0;
+    const status = !ok ? `缺 ${18 - done} 洞`
+      : pending > 0 ? `校對 ${pending} 格` : "✓";
+    const statusCls = !ok ? "text-accent font-bold"
+      : pending > 0 ? "text-yellow-600 font-bold" : "text-green-600";
+    return `<tr data-i="${i}" class="prow border-b ${ok ? (pending ? "bg-yellow-50" : "") : "bg-red-50"}">
+      <td class="p-2 font-semibold">${p.name}${p.is_guest ? "<span class='text-accent text-xs ml-1'>賓</span>" : ""}</td>
+      <td class="p-2 text-center font-mono">${sum(p.scores.slice(0, 9)) ?? "—"}</td>
+      <td class="p-2 text-center font-mono">${sum(p.scores.slice(9)) ?? "—"}</td>
+      <td class="p-2 text-center font-mono font-bold">${sum(p.scores) ?? "—"}</td>
+      <td class="p-2 text-center text-sm ${statusCls}">${status}</td></tr>`;
+  }).join("");
+  const allOk = S.players.length && S.players.every(p => p.scores.every(v => v != null));
+  app().innerHTML = `
+  <div class="bg-white rounded-xl shadow overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-primary text-white">
+        <tr><th class="p-2 text-left">球員</th><th class="p-2">${S.nineNames[0]}</th>
+        <th class="p-2">${S.nineNames[1]}</th><th class="p-2">總桿</th><th class="p-2">狀態</th></tr>
+      </thead><tbody>${rows}</tbody>
+    </table>
+    <p class="text-xs text-gray-400 p-3">紅底＝尚有未填洞，點該列可回去補；差點與淨桿由計分引擎重算，這裡只登總桿。</p>
+  </div>
+  ${navBtns(true, allOk, allOk ? "前往發布" : "尚有未完成球員")}`;
+  document.querySelectorAll(".prow").forEach(tr => tr.onclick = () => {
+    S.cur.p = +tr.dataset.i; S.cur.h = firstEmpty(S.players[S.cur.p]); S.step = 3; render();
+  });
+}
+
+// ------------------ ⑤ 發布 ------------------
+
+// 同分預檢：會員以名冊差點算淨桿，「淨桿同且差點同」群組需總幹事裁定
+function tieGroups() {
+  const roster = Object.fromEntries((rules.players || []).map(p => [p.name, p.handicap]));
+  const members = S.players.filter(p => !p.is_guest && roster[p.name] != null
+                                        && p.scores.every(v => v != null));
+  const byKey = {};
+  for (const p of members) {
+    const gross = p.scores.reduce((a, b) => a + b, 0);
+    const hc = roster[p.name];
+    const key = `${gross - hc}|${hc}`;
+    (byKey[key] = byKey[key] || []).push({ name: p.name, net: gross - hc, handicap: hc });
+  }
+  return Object.values(byKey).filter(g => g.length > 1);
+}
+
+function tiesResolved() {
+  return tieGroups().every(g => g.every(m => S.manualTieOrder.includes(m.name)));
+}
+
+function buildConfirmedJSON() {
+  return {
+    date: S.date,
+    course: S.courseName,
+    course_par: S.coursePar,
+    front_nine_name: S.nineNames[0],
+    back_nine_name: S.nineNames[1],
+    hole_pars: [...S.holePars],
+    source: "手動輸入（admin.html）",
+    manual_awards: { near_pin: S.nearPin.length ? [...S.nearPin] : null },
+    ...(S.manualTieOrder.length ? { manual_tie_order: [...S.manualTieOrder] } : {}),
+    players: S.players.map(p => {
+      const front = p.scores.slice(0, 9), back = p.scores.slice(9);
+      const gross = sum(p.scores);
+      return {
+        name: p.name, is_guest: p.is_guest,
+        front_9: front, back_9: back,
+        front_9_total: sum(front), back_9_total: sum(back),
+        gross, vs_par: gross != null ? gross - S.coursePar : null,
+        validation: gross != null ? "pass" : "fail",
+      };
+    }),
+  };
+}
+
+function renderStep5() {
+  // 進入發布前先跑同分預檢：未裁定的同分是阻斷性的
+  const groups = tieGroups();
+  // 清掉已不存在同分群組的舊裁定
+  const inGroups = new Set(groups.flat().map(m => m.name));
+  S.manualTieOrder = S.manualTieOrder.filter(n => inGroups.has(n));
+  const resolved = tiesResolved();
+
+  const data = buildConfirmedJSON();
+  const path = `pending/${S.date}_confirmed.json`;
+  const hasPat = !!localStorage.getItem(PAT_KEY);
+  const members = S.players.filter(p => !p.is_guest);
+
+  const tieCard = groups.length ? `
+  <div class="bg-white rounded-xl shadow p-4 border-l-4 ${resolved ? "border-green-500" : "border-accent"}">
+    <h2 class="font-bold ${resolved ? "text-green-700" : "text-accent"}">
+      ${resolved ? "✓ 同分已裁定" : "⚠ 同分待裁定（未裁定不得發布）"}</h2>
+    <p class="text-sm text-gray-500 my-2">淨桿與差點皆相同，依章程由總幹事裁定順序
+      （年齡大者優先）。請依「名次前→後」順序點選：</p>
+    ${groups.map(g => `
+      <div class="mb-2 p-2 bg-gray-50 rounded-lg">
+        <div class="text-xs text-gray-400 mb-1">淨桿 ${g[0].net}、差點 ${g[0].handicap}</div>
+        <div class="flex gap-2 flex-wrap">${g.map(m => {
+          const idx = S.manualTieOrder.indexOf(m.name);
+          return `<button data-tn="${m.name}" class="tieBtn key px-4 py-2 rounded-lg border font-semibold
+            ${idx >= 0 ? "bg-primary text-white" : "bg-white text-gray-700"}">
+            ${idx >= 0 ? `${S.manualTieOrder.filter(n => g.some(x => x.name === n)).indexOf(m.name) + 1}. ` : ""}${m.name}
+            <span class="text-xs opacity-70">差點${m.handicap}</span></button>`;
+        }).join("")}</div>
+      </div>`).join("")}
+    <button id="tieReset" class="text-xs text-gray-400">重新裁定</button>
+  </div>` : "";
+
+  app().innerHTML = `
+  <div class="space-y-4">
+  <div class="bg-white rounded-xl shadow p-4">
+    <h2 class="font-bold text-primary mb-2">🎯 近洞獎（現場人工判定，可複選）</h2>
+    <div class="flex gap-2 flex-wrap">${members.map(p => `
+      <button data-np="${p.name}" class="npBtn key px-4 py-2 rounded-full border font-semibold text-sm
+        ${S.nearPin.includes(p.name) ? "bg-accent text-white border-accent" : "bg-white text-gray-700"}">${p.name}</button>`).join("")}
+    </div>
+  </div>
+  ${tieCard}
+  <div class="bg-white rounded-xl shadow p-4 space-y-3">
+    <h2 class="font-bold text-primary">確認稿預覽 <span class="text-sm text-gray-400 font-normal">${path}</span></h2>
+    <textarea id="jsonOut" readonly class="w-full h-40 border rounded-lg p-2 font-mono text-xs bg-gray-50">${JSON.stringify(data, null, 2)}</textarea>
+    <div class="text-sm text-gray-500 leading-relaxed">
+      發布流程：commit 確認稿 → 觸發計分 workflow → 引擎計算排名/獎項/差點
+      → 更新正式成績 → 成績頁自動部署。
+    </div>
+    <div class="flex gap-2">
+      <button id="dlBtn" class="flex-1 border border-primary text-primary rounded-xl py-3 font-bold">下載 JSON</button>
+      <button id="pubBtn" ${resolved ? "" : "disabled"}
+        class="flex-1 rounded-xl py-3 font-bold text-white ${resolved ? "bg-accent" : "bg-gray-300"}">
+        ${resolved ? (hasPat ? "🚀 一鍵發布" : "設定 PAT 後發布") : "同分待裁定"}</button>
+    </div>
+    <div id="pubLog" class="text-sm font-mono whitespace-pre-wrap"></div>
+    <button id="resetBtn" class="w-full text-gray-400 text-sm py-2">🗑 清除本場草稿、重新開始</button>
+  </div>
+  </div>
+  ${navBtns(true, false, "")}`;
+
+  document.querySelectorAll(".npBtn").forEach(b => b.onclick = () => {
+    const n = b.dataset.np;
+    S.nearPin = S.nearPin.includes(n) ? S.nearPin.filter(x => x !== n) : [...S.nearPin, n];
+    render();
+  });
+  document.querySelectorAll(".tieBtn").forEach(b => b.onclick = () => {
+    const n = b.dataset.tn;
+    if (!S.manualTieOrder.includes(n)) { S.manualTieOrder.push(n); render(); }
+  });
+  const tr = $("tieReset");
+  if (tr) tr.onclick = () => { S.manualTieOrder = []; render(); };
+
+  $("dlBtn").onclick = () => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${S.date}_confirmed.json`;
+    a.click();
+  };
+  $("pubBtn").onclick = () => hasPat ? doPublish(data, path) : openPat();
+  $("resetBtn").onclick = () => {
+    if (confirm("確定清除本場全部輸入？")) { localStorage.removeItem(DRAFT_KEY); S = newState(); render(); }
+  };
+}
+
+async function ghFetch(url, opts = {}) {
+  const pat = localStorage.getItem(PAT_KEY);
+  const res = await fetch(`https://api.github.com${url}`, {
+    ...opts,
+    headers: {
+      "Authorization": `Bearer ${pat}`,
+      "Accept": "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      ...(opts.headers || {}),
+    },
+  });
+  return res;
+}
+
+async function doPublish(data, path) {
+  const log = (m) => { $("pubLog").textContent += m + "\n"; };
+  $("pubLog").textContent = "";
+  $("pubBtn").disabled = true;
+  try {
+    // 同名檔已存在時需帶 sha 更新（重發布情境）
+    let sha;
+    const head = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
+    if (head.ok) sha = (await head.json()).sha;
+
+    log("① commit 確認稿…");
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 2))));
+    const put = await ghFetch(`/repos/${REPO}/contents/${path}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: `admin: ${S.date} 確認稿（${S.courseName}）`,
+        content, branch: BRANCH, ...(sha ? { sha } : {}),
+      }),
+    });
+    if (!put.ok) throw new Error(`commit 失敗 HTTP ${put.status}：${(await put.json()).message || ""}`);
+    log("　✓ 已寫入 " + path);
+
+    log("② 觸發計分 workflow…");
+    const disp = await ghFetch(`/repos/${REPO}/actions/workflows/score.yml/dispatches`, {
+      method: "POST",
+      body: JSON.stringify({ ref: BRANCH, inputs: { input_path: path } }),
+    });
+    if (disp.status !== 204) throw new Error(`dispatch 失敗 HTTP ${disp.status}`);
+    log("　✓ 已觸發");
+    log(`\n🎉 發布完成！計分結果請看：\nhttps://github.com/${REPO}/actions`);
+    localStorage.removeItem(DRAFT_KEY);   // 發布成功即清草稿
+  } catch (e) {
+    log(`\n❌ ${e.message}\n（確認稿未遺失，可重試或改用「下載 JSON」）`);
+  } finally {
+    $("pubBtn").disabled = false;
+  }
+}
+
+// ------------------ PAT modal ------------------
+
+function openPat() {
+  $("patInput").value = localStorage.getItem(PAT_KEY) || "";
+  $("patModal").classList.remove("hidden");
+}
+$("patBtn").onclick = openPat;
+$("patClose").onclick = () => $("patModal").classList.add("hidden");
+$("patSave").onclick = () => {
+  const v = $("patInput").value.trim();
+  if (v) localStorage.setItem(PAT_KEY, v);
+  $("patModal").classList.add("hidden");
+  if (S) render();
+};
+$("patClear").onclick = () => {
+  localStorage.removeItem(PAT_KEY);
+  $("patInput").value = "";
+};
+
+boot();
+</script>
+</body>
+</html>
