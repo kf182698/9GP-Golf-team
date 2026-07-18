@@ -261,10 +261,19 @@ def normalize_handwritten(parsed, threshold=LOW_CONFIDENCE_THRESHOLD):
     for p in parsed.get("players", []):
         for key in ("front_9", "back_9"):
             cells = p.get(key, [])
-            if not all(isinstance(c, dict) for c in cells):
-                continue  # 已是正規化格式
-            p[key] = [c["value"] for c in cells]
-            p[f"{key}_confidence"] = [c["confidence"] for c in cells]
+            if not any(isinstance(c, dict) for c in cells):
+                continue  # 沒有 {value,confidence} 格 → 已是正規化桿數陣列，跳過
+            # 逐格安全解析：非 dict（如 null 或已是數字）不讓後續 sum() 崩潰
+            values, conf = [], []
+            for c in cells:
+                if isinstance(c, dict):
+                    values.append(c.get("value"))
+                    conf.append(c.get("confidence", 0.0))
+                else:
+                    values.append(c if isinstance(c, int) else None)
+                    conf.append(0.0)
+            p[key] = values
+            p[f"{key}_confidence"] = conf
         conf = p.get("front_9_confidence", []) + p.get("back_9_confidence", [])
         values = list(p.get("front_9", [])) + list(p.get("back_9", []))
         p["low_confidence_holes"] = [

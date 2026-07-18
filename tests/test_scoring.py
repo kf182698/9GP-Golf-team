@@ -181,6 +181,28 @@ def test_manual_tie_order_must_cover_both(rules, match_input):
     assert result["needs_manual_resolution"] is True
 
 
+def test_member_missing_gross_raises_clear_error(rules, match_input):
+    """會員缺總桿 → 明確 ValueError 指名，不 TypeError 崩潰、不靜默略過。"""
+    tampered = copy.deepcopy(match_input)
+    for p in tampered["players"]:
+        if p["name"] == "王建亞":
+            p["gross"] = None
+    with pytest.raises(ValueError, match="王建亞"):
+        score(rules, tampered)
+
+
+def test_guest_missing_gross_is_tolerated(rules, match_input):
+    """來賓缺總桿不影響排名計算（來賓不列入排名，成績仍保留）。"""
+    tampered = copy.deepcopy(match_input)
+    for p in tampered["players"]:
+        if p["is_guest"]:
+            p["gross"] = None
+            break
+    result = score(rules, tampered)  # 不應 raise
+    assert "needs_manual_resolution" not in result
+    assert len(result["net_ranking"]) == 8
+
+
 def test_gross_champion_cascade(rules, match_input):
     """總桿冠軍年度已領過 → 連鎖順延至次低未領者。"""
     result = score(rules, match_input, prior_gross_winners={"王建亞", "陳淂笙"})

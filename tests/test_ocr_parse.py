@@ -118,6 +118,23 @@ def test_handwritten_normalization():
     assert p["unreadable_holes"] == [10]      # 第 10 洞 null → 標紅
 
 
+def test_handwritten_mixed_null_cells_no_crash(rules):
+    """手寫卡陣列若混入 null（模型違反 schema，gemini 無強制時可能發生）→
+    逐格安全解析，不讓後續 validate 的 sum() 崩潰，該格標紅。"""
+    front = [{"value": 5, "confidence": 0.9}] * 8 + [None]  # 第9洞是裸 null
+    back = [{"value": 5, "confidence": 0.9}] * 9
+    parsed = {"course_par": 73, "players": [
+        {"name": "測試", "front_9": front, "back_9": back}]}
+    result = normalize_handwritten(parsed)
+    p = result["players"][0]
+    assert p["front_9"][8] is None
+    assert p["front_9"][:8] == [5] * 8
+    assert p["unreadable_holes"] == [9]
+    # 正規化後可安全跑驗證（不 TypeError），該列 fail
+    validated = validate(result, rules)
+    assert validated["players"][0]["validation"] == "fail"
+
+
 # ------------------ prompt 與 schema ------------------
 
 def test_prompt_contains_roster_and_no_guess_rule(rules):

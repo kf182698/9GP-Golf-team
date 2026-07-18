@@ -40,12 +40,22 @@ def roster_handicaps(rules):
 
 
 def classify_players(input_players, roster):
-    """分離會員與來賓。is_guest 標記或不在名冊者一律視為來賓。"""
+    """分離會員與來賓。is_guest 標記或不在名冊者一律視為來賓。
+
+    會員缺總桿（gross 為 None）會導致排序/淨桿計算崩潰——明確報錯指出是誰，
+    不靜默略過（略過會把人從排名裡默默拿掉，反而藏錯）。未出賽者不應出現在
+    match_input，請於發布端以「請假」處理。
+    """
     members, guests = [], []
     for p in input_players:
         if p.get("is_guest") or p["name"] not in roster:
             guests.append(p)
         else:
+            if p.get("gross") is None:
+                raise ValueError(
+                    f"會員「{p['name']}」缺少總桿數（gross）；請補齊成績，"
+                    "或若未出賽請勿列入 match_input（由發布端標記請假）"
+                )
             members.append(p)
     return members, guests
 

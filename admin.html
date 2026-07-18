@@ -283,6 +283,13 @@ async function loadDraft() {
   } catch (e) { log(`❌ ${e.message}`); }
 }
 
+// 半場桿數強制補齊/截斷至剛好 9 格（OCR 漏辨識或格式異常時，
+// 逐洞輸入介面才不會漏掉球洞）
+function nineCells(arr) {
+  const a = Array.isArray(arr) ? arr : [];
+  return Array.from({ length: 9 }, (_, i) => (a[i] === undefined ? null : a[i]));
+}
+
 function applyDraft(draft) {
   if (draft.date) S.date = draft.date;
   // 球場：比對 courses 名稱；比對不到 → 自訂（帶草稿的 hole_pars）
@@ -299,7 +306,7 @@ function applyDraft(draft) {
   S.players = (draft.players || []).map(p => ({
     name: p.name,
     is_guest: !!p.is_guest,
-    scores: [...(p.front_9 || Array(9).fill(null)), ...(p.back_9 || Array(9).fill(null))],
+    scores: [...nineCells(p.front_9), ...nineCells(p.back_9)],  // 保證 18 格
     ocr: {
       validation: p.validation || "fail",
       low: (p.low_confidence_holes || []).map(h => h - 1),      // 轉 0-based
