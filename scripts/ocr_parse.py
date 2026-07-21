@@ -369,43 +369,27 @@ def parse_scorecard(image_paths, card_type, rules, provider=DEFAULT_PROVIDER,
     return parsed
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="9GP 成績卡辨識")
-    parser.add_argument("--rules", required=True, help="rules.yaml 路徑")
-    parser.add_argument("--image", required=True, action="append",
-                        help="成績卡照片路徑（可重複指定多張）")
-    parser.add_argument("--card-type", choices=["iswing", "handwritten"],
-                        default="iswing")
-    parser.add_argument("--provider", choices=list(PROVIDERS),
-                        default=DEFAULT_PROVIDER,
-                        help=f"Vision 供應商（預設 {DEFAULT_PROVIDER}）")
-    parser.add_argument("--model", default=None,
-                        help="覆寫模型（預設依 provider，亦可用環境變數 OCR_MODEL）")
-    parser.add_argument("--out", default=None,
-                        help="輸出草稿 JSON 路徑（預設 pending/<date>_draft.json）")
-    args = parser.parse_args(argv)
+# --- 供 slash command 調用 ---
 
-    rules = load_rules(args.rules)
-    draft = parse_scorecard(args.image, args.card_type, rules,
-                            provider=args.provider, model=args.model)
+def scorecard_ocr(image_paths, card_type, rules, provider=DEFAULT_PROVIDER,
+                  model=None, output_dir="pending"):
+    """辨識成績卡並寫入 pending/ 草稿（供 /scorecard 指令調用）。
 
-    out = args.out
-    if out is None:
-        date = draft.get("date") or "unknown-date"
-        out = os.path.join("pending", f"{date}_draft.json")
-    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
+    回傳 (draft_dict, output_path, passed, failed_names)，
+    由 slash command 負責向使用者報告結果與寫入 git。
+    """
+    draft = parse_scorecard(image_paths, card_type, rules,
+                           provider=provider, model=model)
+
+    date = draft.get("date") or "unknown-date"
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"{date}_draft.json")
+
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(draft, f, ensure_ascii=False, indent=2)
 
     failed = [p["name"] for p in draft.get("players", [])
               if p.get("validation") != "pass"]
-    print(f"草稿已寫入 {out}")
-    if failed:
-        print(f"⚠ 驗證未通過（校對頁面將高亮）：{'、'.join(failed)}")
-        return 1
-    print("三重交叉驗證全數通過")
-    return 0
+    passed = len(draft.get("players", [])) - len(failed)
 
-
-if __name__ == "__main__":
-    sys.exit(main())
+    return draft, output_path, passed, failed

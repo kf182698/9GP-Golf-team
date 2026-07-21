@@ -242,17 +242,11 @@ def test_dry_run_writes_nothing(sandbox, capsys):
 # ------------------ workflow 檔案 ------------------
 
 def test_workflows_parse_and_have_required_fields():
-    for name in ("ocr.yml", "score.yml"):
-        with open(REPO_ROOT / ".github" / "workflows" / name, encoding="utf-8") as f:
-            wf = yaml.safe_load(f)
-        # PyYAML 會把 on 解析成 True（YAML 1.1 布林）
-        triggers = wf.get("on") or wf.get(True)
-        assert "workflow_dispatch" in triggers
-        assert wf["permissions"] == {"contents": "write"}
-        assert "jobs" in wf
-    with open(REPO_ROOT / ".github" / "workflows" / "ocr.yml", encoding="utf-8") as f:
-        ocr = yaml.safe_load(f)
-    inputs = (ocr.get("on") or ocr.get(True))["workflow_dispatch"]["inputs"]
-    assert set(inputs) == {"image_dir", "card_type", "provider"}
-    assert inputs["card_type"]["options"] == ["iswing", "handwritten"]
-    assert inputs["provider"]["options"] == ["anthropic", "openai", "gemini"]
+    # score.yml is the only workflow now (ocr.yml moved to local /scorecard command)
+    with open(REPO_ROOT / ".github" / "workflows" / "score.yml", encoding="utf-8") as f:
+        wf = yaml.safe_load(f)
+    # PyYAML 會把 on 解析成 True（YAML 1.1 布林）
+    triggers = wf.get("on") or wf.get(True)
+    assert "workflow_dispatch" in triggers
+    assert wf["permissions"] == {"contents": "write"}
+    assert "jobs" in wf

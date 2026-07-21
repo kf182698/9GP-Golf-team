@@ -179,28 +179,16 @@ function renderStep1() {
   </div>
 
   <div class="bg-white rounded-xl shadow p-4 mt-4 space-y-3">
-    <h2 class="font-bold text-primary">📷 成績卡辨識（選用——沒有照片也能直接下一步手動輸入）</h2>
-    <div class="flex gap-2 items-center">
-      <select id="fCardType" class="border rounded-lg p-2 bg-white text-sm">
-        <option value="iswing" ${S.cardType === "iswing" ? "selected" : ""}>iSwing 列印卡</option>
-        <option value="handwritten" ${S.cardType === "handwritten" ? "selected" : ""}>手寫卡</option>
-      </select>
-      <select id="fProvider" class="border rounded-lg p-2 bg-white text-sm">
-        <option value="anthropic" ${S.provider === "anthropic" ? "selected" : ""}>Anthropic</option>
-        <option value="openai" ${S.provider === "openai" ? "selected" : ""}>OpenAI</option>
-        <option value="gemini" ${S.provider === "gemini" ? "selected" : ""}>Gemini</option>
-      </select>
-    </div>
-    <div class="flex gap-2 items-center">
-      <input id="photoIn" type="file" accept="image/*" multiple class="hidden">
-      <button id="photoBtn" class="flex-1 border border-primary text-primary rounded-lg py-2 font-semibold text-sm">選照片並上傳辨識</button>
+    <h2 class="font-bold text-primary">📋 辨識草稿（選用——若無草稿可直接手動輸入）</h2>
+    <div id="draftAlert" class="hidden bg-blue-50 border border-blue-300 rounded-lg p-3 text-sm text-blue-800">
+      ℹ️ 偵測到 <span id="draftDate"></span> 的未處理草稿，可按下方按鈕載入預填
     </div>
     <button id="draftBtn" class="w-full bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700">⬇ 載入辨識草稿（pending/${S.date}_draft.json）</button>
     <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
   </div>
   ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
 
-  $("fDate").onchange = e => { S.date = e.target.value; save(); };
+  $("fDate").onchange = e => { S.date = e.target.value; save(); detectDraft(); };
   $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
   if (isCustom) {
     $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
@@ -219,50 +207,7 @@ function renderStep1() {
   }
   $("fCardType").onchange = e => { S.cardType = e.target.value; save(); };
   $("fProvider").onchange = e => { S.provider = e.target.value; save(); };
-  $("photoBtn").onclick = () => {
-    if (!localStorage.getItem(PAT_KEY)) return openPat();
-    $("photoIn").click();
-  };
-  $("photoIn").onchange = e => uploadPhotos([...e.target.files]);
   $("draftBtn").onclick = loadDraft;
-}
-
-// ------------------ 照片上傳 → 觸發辨識 workflow ------------------
-
-async function uploadPhotos(files) {
-  const log = m => { $("ocrLog").textContent += m + "\n"; };
-  if (!files.length) return;
-  $("ocrLog").textContent = "";
-  const dir = `scorecards/${S.date}`;
-  try {
-    for (const f of files) {
-      log(`上傳 ${f.name}…`);
-      const b64 = await new Promise((ok, err) => {
-        const r = new FileReader();
-        r.onload = () => ok(r.result.split(",")[1]);
-        r.onerror = err;
-        r.readAsDataURL(f);
-      });
-      const path = `${dir}/${f.name}`;
-      let sha;
-      const head = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
-      if (head.ok) sha = (await head.json()).sha;
-      const put = await ghFetch(`/repos/${REPO}/contents/${path}`, {
-        method: "PUT",
-        body: JSON.stringify({ message: `photo: ${path}`, content: b64,
-                               branch: BRANCH, ...(sha ? { sha } : {}) }),
-      });
-      if (!put.ok) throw new Error(`上傳失敗 HTTP ${put.status}`);
-    }
-    log("觸發辨識 workflow…");
-    const disp = await ghFetch(`/repos/${REPO}/actions/workflows/ocr.yml/dispatches`, {
-      method: "POST",
-      body: JSON.stringify({ ref: BRANCH,
-        inputs: { image_dir: dir, card_type: S.cardType, provider: S.provider } }),
-    });
-    if (disp.status !== 204) throw new Error(`dispatch 失敗 HTTP ${disp.status}`);
-    log(`✓ 辨識中（約 1-2 分鐘）。完成後點「載入辨識草稿」預填格子。\n進度：https://github.com/${REPO}/actions`);
-  } catch (e) { log(`❌ ${e.message}`); }
 }
 
 // ------------------ 載入 OCR 草稿 → 預填 + 色碼 ------------------
@@ -281,6 +226,21 @@ async function loadDraft() {
     render();   // 先重繪（會清掉 #ocrLog），再寫結果訊息
     log(`✓ 已預填 ${draft.players.length} 位球員。黃格=低信心、紅格=無法辨識，請逐格校對；任何格都可覆寫。`);
   } catch (e) { log(`❌ ${e.message}`); }
+}
+
+// 自動偵測該日期是否有未處理草稿，若有顯示提示條
+async function detectDraft() {
+  if (!localStorage.getItem(PAT_KEY)) return;  // 沒 PAT 無法檢查
+  const path = `pending/${S.date}_draft.json`;
+  try {
+    const res = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
+    if (res.ok) {
+      $("draftAlert")?.classList.remove("hidden");
+      $("draftDate").textContent = S.date;
+    } else {
+      $("draftAlert")?.classList.add("hidden");
+    }
+  } catch (_) { $("draftAlert")?.classList.add("hidden"); }
 }
 
 // 半場桿數強制補齊/截斷至剛好 9 格（OCR 漏辨識或格式異常時，
@@ -303,16 +263,37 @@ function applyDraft(draft) {
     S.nineNames = [draft.front_nine_name || "前九", draft.back_nine_name || "後九"];
     S.coursePar = draft.course_par ?? S.holePars.reduce((a, b) => a + b, 0);
   }
-  S.players = (draft.players || []).map(p => ({
-    name: p.name,
-    is_guest: !!p.is_guest,
-    scores: [...nineCells(p.front_9), ...nineCells(p.back_9)],  // 保證 18 格
-    ocr: {
-      validation: p.validation || "fail",
-      low: (p.low_confidence_holes || []).map(h => h - 1),      // 轉 0-based
-      unread: (p.unreadable_holes || []).map(h => h - 1),
-    },
-  }));
+  const roster = (rules.players || []).map(p => p.name);
+  S.players = (draft.players || []).map(p => {
+    const existing = S.players.find(sp => sp.name === p.name);
+    const scores = existing ? existing.scores : [...nineCells(p.front_9), ...nineCells(p.back_9)];
+    // 名字匹配：uncertain/unmatched 才需要候選選項
+    let nameCandidates = [];
+    if (p.name_match === "uncertain" && p.name_candidates) {
+      nameCandidates = p.name_candidates.map((c, i) => ({
+        name: c, sim: p.name_similarities?.[i] || 0.6, isCandidate: true
+      }));
+      nameCandidates.sort((a, b) => b.sim - a.sim);  // 按相似度排序
+      const other = roster.filter(n => !nameCandidates.some(x => x.name === n));
+      nameCandidates.push(...other.map(n => ({ name: n, sim: 0, isCandidate: false })));
+      nameCandidates.push({ name: "新增來賓：" + p.name, sim: 0, isGuest: true });
+    } else if (p.name_match === "unmatched") {
+      nameCandidates.push({ name: "新增來賓：" + p.name, sim: 0, isGuest: true });
+      nameCandidates.push(...roster.map(n => ({ name: n, sim: 0, isCandidate: false })));
+    }
+    return {
+      name: p.name,
+      is_guest: !!p.is_guest,
+      scores: scores,
+      ocr: {
+        validation: p.validation || "fail",
+        low: (p.low_confidence_holes || []).map(h => h - 1),      // 轉 0-based
+        unread: (p.unreadable_holes || []).map(h => h - 1),
+        nameMatch: p.name_match || "exact",
+      },
+      nameCandidates: nameCandidates,
+    };
+  });
   S.cur = { p: 0, h: 0 };
 }
 function applyCourse(id) {
@@ -334,54 +315,105 @@ function applyCourse(id) {
 
 function renderStep2() {
   const roster = (rules.players || []).map(p => p.name);
-  const chosen = S.players.map(p => p.name);
+  const uncertain = S.players.filter(p => p.ocr?.nameMatch === "uncertain").length;
   app().innerHTML = `
-  <div class="bg-white rounded-xl shadow p-4">
-    <div class="flex justify-between items-center mb-3">
-      <h2 class="font-bold text-primary">勾選出賽會員</h2>
-      <span class="text-sm text-gray-500">已選 <b id="cnt">${S.players.length}</b> 人</span>
+  <div class="bg-white rounded-xl shadow p-4 space-y-3">
+    <h2 class="font-bold text-primary">出賽名單</h2>
+    ${uncertain > 0 ? `<div class="bg-yellow-50 border border-yellow-300 rounded p-3 text-sm text-yellow-800">⚠️ 有 ${uncertain} 列名字辨識不確定，請檢視黃邊框列並確認身份</div>` : ""}
+    <div class="space-y-2 max-h-96 overflow-y-auto">
+      ${S.players.map((p, i) => {
+        const isUncertain = p.ocr?.nameMatch === "uncertain";
+        const isUnmatched = p.ocr?.nameMatch === "unmatched";
+        const border = isUncertain || isUnmatched ? "border-yellow-400 border-2" : "";
+        return `
+        <div class="flex gap-2 items-center p-2 rounded ${p.is_guest ? "bg-orange-50 opacity-75" : "bg-gray-50"} ${border}">
+          ${p.nameCandidates && p.nameCandidates.length > 0 ? `
+            <select data-i="${i}" class="candSel flex-1 border rounded p-2 text-sm">
+              <option value="">選擇…</option>
+              ${p.nameCandidates.map(c => {
+                const label = c.isGuest ? c.name : (c.isCandidate ? `${c.name} ${Math.round(c.sim * 100)}%` : c.name);
+                return `<option value="${c.name}" data-guest="${!!c.isGuest}">${label}</option>`;
+              }).join("")}
+            </select>
+          ` : `
+            <select data-i="${i}" class="psel flex-1 border rounded p-2 text-sm">
+              <option value="">選擇會員…</option>
+              ${roster.map(n => `<option value="${n}" ${p.name === n ? "selected" : ""}>${n}</option>`).join("")}
+              <option value="__new_guest" ${p.is_guest ? "selected" : ""}>+ 新增來賓</option>
+            </select>
+          `}
+          ${p.is_guest ? `<input data-i="${i}" type="text" class="guestInput flex-1 border rounded p-2 text-sm" value="${p.name}" placeholder="來賓姓名">` : ""}
+          <label class="flex items-center gap-1 text-xs whitespace-nowrap cursor-pointer">
+            <input type="checkbox" data-i="${i}" class="guestToggle" ${p.is_guest ? "checked" : ""}>
+            來賓
+          </label>
+          <button data-i="${i}" class="pdel text-red-500 font-bold">✕</button>
+        </div>
+        `;
+      }).join("")}
     </div>
-    <div class="grid grid-cols-3 gap-2">${roster.map(n => `
-      <button data-name="${n}" class="mem key py-3 rounded-xl border text-sm font-semibold
-        ${chosen.includes(n) ? "bg-primary text-white border-primary" : "bg-gray-50 text-gray-700"}">${n}</button>`).join("")}
-    </div>
-    <div class="mt-5">
-      <h2 class="font-bold text-primary mb-2">來賓（章程允許與賽，不列入排名）</h2>
-      <div class="flex gap-2">
-        <input id="guestName" placeholder="來賓姓名" class="flex-1 border rounded-lg p-3">
-        <button id="guestAdd" class="px-4 bg-accent text-white rounded-lg font-bold">＋加入</button>
-      </div>
-      <div id="guestList" class="flex flex-wrap gap-2 mt-3">${S.players.filter(p => p.is_guest).map(g => `
-        <span class="bg-orange-50 text-accent border border-accent/40 rounded-full px-3 py-1 text-sm">
-          ${g.name} <button data-g="${g.name}" class="gdel font-bold ml-1">×</button></span>`).join("")}
-      </div>
-    </div>
+    <button id="addRow" class="w-full bg-primary text-white rounded-lg py-2 font-semibold text-sm">+ 加入球員</button>
   </div>
   ${navBtns(true, S.players.length > 0, `開始輸入（${S.players.length} 人）`)}`;
 
-  document.querySelectorAll(".mem").forEach(b => b.onclick = () => {
-    const n = b.dataset.name;
-    const i = S.players.findIndex(p => p.name === n);
-    if (i >= 0) {
-      const filled = S.players[i].scores.some(v => v != null);
-      if (filled && !confirm(`${n} 已有輸入成績，確定移除？`)) return;
-      S.players.splice(i, 1);
-    } else {
-      S.players.push({ name: n, is_guest: false, scores: Array(18).fill(null) });
+  // 變更會員/來賓選擇（名字匹配候選）
+  document.querySelectorAll(".candSel").forEach(sel => sel.onchange = e => {
+    const i = +e.target.dataset.i;
+    const v = e.target.value;
+    const isGuest = e.target.options[e.target.selectedIndex]?.dataset.guest === "true";
+    if (v.startsWith("新增來賓：")) {
+      S.players[i].name = v.substring(5);  // 去掉前綴
+      S.players[i].is_guest = true;
+    } else if (v) {
+      S.players[i].name = v;
+      S.players[i].is_guest = isGuest;
+    }
+    S.players[i].ocr.nameMatch = "resolved";  // 標記已處理
+    render();
+  });
+
+  // 變更會員/來賓選擇（一般下拉）
+  document.querySelectorAll(".psel").forEach(sel => sel.onchange = e => {
+    const i = +e.target.dataset.i;
+    const v = e.target.value;
+    if (v === "__new_guest") {
+      S.players[i].is_guest = true;
+      S.players[i].name = "";
+    } else if (v) {
+      S.players[i].name = v;
+      S.players[i].is_guest = false;
     }
     render();
   });
-  $("guestAdd").onclick = () => {
-    const n = $("guestName").value.trim();
-    if (!n) return;
-    if (S.players.some(p => p.name === n)) { alert("名單已有同名"); return; }
-    S.players.push({ name: n, is_guest: true, scores: Array(18).fill(null) });
-    render();
-  };
-  document.querySelectorAll(".gdel").forEach(b => b.onclick = () => {
-    S.players = S.players.filter(p => p.name !== b.dataset.g);
+
+  // 來賓名稱輸入
+  document.querySelectorAll(".guestInput").forEach(inp => inp.oninput = e => {
+    const i = +e.target.dataset.i;
+    S.players[i].name = e.target.value.trim();
+    save();
+  });
+
+  // 來賓開關
+  document.querySelectorAll(".guestToggle").forEach(chk => chk.onchange = e => {
+    const i = +e.target.dataset.i;
+    S.players[i].is_guest = e.target.checked;
     render();
   });
+
+  // 刪除行
+  document.querySelectorAll(".pdel").forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.i;
+    const filled = S.players[i].scores.some(v => v != null);
+    if (filled && !confirm(`${S.players[i].name} 已有輸入成績，確定移除？`)) return;
+    S.players.splice(i, 1);
+    render();
+  });
+
+  // 加入行
+  $("addRow").onclick = () => {
+    S.players.push({ name: "", is_guest: false, scores: Array(18).fill(null) });
+    render();
+  };
 }
 
 // ------------------ ③ 單人逐洞輸入 ------------------
@@ -615,8 +647,30 @@ function renderStep5() {
     <button id="tieReset" class="text-xs text-gray-400">重新裁定</button>
   </div>` : "";
 
+  const guests = S.players.filter(p => p.is_guest).length;
   app().innerHTML = `
   <div class="space-y-4">
+  <div class="bg-blue-50 border border-blue-300 rounded-xl p-4">
+    <h2 class="font-bold text-blue-700 mb-3">📊 本場人員確認</h2>
+    <div class="grid grid-cols-3 gap-4 text-center">
+      <div>
+        <div class="text-2xl font-bold text-primary">${S.players.length}</div>
+        <div class="text-xs text-gray-600">總人數</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-primary">${members.length}</div>
+        <div class="text-xs text-gray-600">排名會員</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-accent">${guests}</div>
+        <div class="text-xs text-gray-600">來賓（不排名）</div>
+      </div>
+    </div>
+    <div class="mt-3 p-3 bg-white rounded-lg text-sm text-gray-700 border-l-4 border-blue-400">
+      ✓ 將進行淨桿排名計算，排名對象為 <b>${members.length}</b> 位會員；來賓成績保留存查，不列入排名與獎項。
+    </div>
+    <button id="summaryConfirm" class="w-full mt-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold text-sm">確認無誤，繼續</button>
+  </div>
   <div class="bg-white rounded-xl shadow p-4">
     <h2 class="font-bold text-primary mb-2">🎯 近洞獎（現場人工判定，可複選）</h2>
     <div class="flex gap-2 flex-wrap">${members.map(p => `
@@ -643,6 +697,14 @@ function renderStep5() {
   </div>
   </div>
   ${navBtns(true, false, "")}`;
+
+  const summaryConfirm = $("summaryConfirm");
+  if (summaryConfirm) {
+    summaryConfirm.onclick = () => {
+      summaryConfirm.style.display = "none";  // 隱藏確認按鈕
+      $("summaryConfirm").classList.add("hidden");
+    };
+  }
 
   document.querySelectorAll(".npBtn").forEach(b => b.onclick = () => {
     const n = b.dataset.np;

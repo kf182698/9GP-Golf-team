@@ -15,23 +15,33 @@
 ## 系統架構
 
 ```
-┌─ PWA（GitHub Pages 上的手機網頁）────────┐
-│ admin.html : ①上傳 ②辨識校對 ③手動獎項輸入 │
+┌─ 本地 Claude Code IDE ──────────────────┐
+│ /scorecard <照片> --card-type iswing    │
+│   ↓ 呼叫 ocr_parse.scorecard_ocr()      │
+│   ↓ 寫入 pending/<date>_draft.json      │
+└──────────┬────────────────────┘
+           ▼
+┌─ PWA（GitHub Pages 上的手機網頁）────────────────┐
+│ admin.html :                               │
+│ ① 選日期、偵測 draft → 載入預填              │
+│ ② 會員下拉 + 名字候選 → 校對確認           │
+│ ③ 逐洞輸入（手 key 或 OCR 預填）           │
+│ ④ 總表檢視 → ⑤ 手動獎項 + 同分裁定 + 發布 │
 │ index.html : 成績與獎項查詢（對外公開唯讀）  │
 └──────────┬────────────────────┘
            │ GitHub API（fine-grained PAT，存於瀏覽器 localStorage）
            ▼
 ┌─ Repo: kf182698/9GP-Golf-team ──────────┐
 │ scorecards/      原始照片存檔              │
-│ pending/         AI 辨識草稿 JSON          │
+│ pending/         OCR 辨識草稿 JSON         │
 │ golf_scores.json 正式成績（唯一資料源）      │
 │ rules.yaml       計積規則（唯一規則來源）     │
 └──────────┬────────────────────┘
            │ 觸發 GitHub Actions
            ▼
-┌─ Actions（金鑰放 GitHub Secrets）─────────┐
-│ ocr.yml   : 照片 → Claude Vision → pending/ │
-│ score.yml : 確認後 → scoring.py → 更新成績   │
+┌─ Actions（score.yml，金鑰放 GitHub Secrets）──────┐
+│ 確認稿 → scoring.py 計分 → 獲獎名單 + 差點調整 →   │
+│ golf_scores.json + rules.yaml + GitHub Pages 自動更新 │
 └────────────────────────────────────┘
 ```
 
@@ -40,18 +50,20 @@
 ```
 9GP-Golf-team/
 ├── index.html          # 對外：成績/獎項/差點走勢
-├── admin.html          # 總幹事：上傳、校對、手動輸入、一鍵發布
+├── admin.html          # 總幹事：選日期、校對、手動輸入、一鍵發布
 ├── manifest.json       # PWA 設定（加到主畫面）
 ├── golf_scores.json    # 正式成績資料庫
 ├── rules.yaml          # 計積規則設定檔
-├── scorecards/         # 原始照片，依日期分資料夾
-├── pending/            # 待確認辨識草稿
+├── scorecards/         # 原始照片存檔，依日期分資料夾
+├── pending/            # OCR 辨識草稿 JSON
 ├── scripts/
-│   ├── ocr_parse.py    # Claude Vision 辨識成績卡
+│   ├── ocr_parse.py    # Claude Vision 辨識成績卡（由 /scorecard 命令呼叫）
 │   └── scoring.py      # 計分引擎
+├── .claude/
+│   └── commands/
+│       └── scorecard.md  # /scorecard 命令規格
 └── .github/workflows/
-    ├── ocr.yml
-    └── score.yml
+    └── score.yml         # 確認稿 → 計分 + 發布
 ```
 
 ## 核心設計原則
@@ -107,9 +119,10 @@ OCR 是選配，手動輸入網格是必備。
 `rules.yaml` 的 `courses` 區塊登錄各球場每洞 par。選定球場後自動帶入，
 減少手動輸入量、提供輸入預設值、供 Eagle 判定與驗證使用。新球場第一次打完後補登。
 
-## OCR 辨識 schema
+## OCR 辨識流程與 schema
 
-`ocr_parse.py` 呼叫 Claude Vision，須輸出：
+`/scorecard` 命令呼叫 `ocr_parse.scorecard_ocr()` 進行辨識，輸出 `pending/<date>_draft.json`。
+Draft schema 如下：
 
 ```json
 {
@@ -122,6 +135,9 @@ OCR 是選配，手動輸入網格是必備。
   "players": [
     {
       "name": "王建亞",
+      "ocr_name": "王建亚",
+      "name_match": "exact",
+      "name_candidates": null,
       "is_guest": false,
       "front_9": [5,4,7,4,5,4,5,5,4],
       "back_9": [6,6,3,5,5,5,4,5,4],
@@ -129,15 +145,30 @@ OCR 是選配，手動輸入網格是必備。
       "back_9_total": 43,
       "gross": 86,
       "vs_par": 13,
-      "validation": "pass"
+      "validation": "pass",
+      "low_confidence_holes": null,
+      "unreadable_holes": null
     }
   ]
 }
 ```
 
-- 姓名以 rules.yaml 的 players 名冊做模糊比對；比對不到者標記 `is_guest: true`（章程允許來賓與賽）
-- **三重交叉驗證**（見 rules.yaml validation 區塊）：逐洞加總 = 半場總和；前九+後九 = 總桿；總桿 − 球場 par = +N 欄
-- 驗證不通過的列標記 `validation: "fail"`，校對頁面高亮；通過者綠燈，總幹事只需檢視紅字
+### Draft 欄位說明
+
+- **name_match**：`"exact"` / `"uncertain"` / `"unmatched"`
+  - `exact`：與名冊完全或高度匹配（相似度 > 0.9）
+  - `uncertain`：部分匹配（0.6 ≤ 相似度 ≤ 0.9）→ admin.html 提供候選下拉
+  - `unmatched`：名冊查無此人 → 標記 is_guest、提供「新增來賓」選項
+- **name_candidates**：不確定時提供的候選列表（按相似度排序）
+- **validation**：`"pass"` / `"fail"`（三重交叉驗證：逐洞和 = 半場、前後九 = 總桿、總桿 − par = vs_par）
+- **low_confidence_holes**（手寫卡）：信心 < 0.8 的洞號列表，前端標黃
+- **unreadable_holes**（手寫卡）：無法辨識（null）的洞號列表，前端標紅
+
+### 辨識原則
+
+- 姓名以 rules.yaml 的 players 名冊做模糊比對（cutoff 0.6）；比對不到者標記 `is_guest: true`
+- **三重交叉驗證**：逐洞加總 = 半場總和；前九+後九 = 總桿；總桿 − 球場 par = +N 欄
+- 驗證不通過的列標記 `validation: "fail"`，校對頁面高亮；通過者綠燈
 - **手寫卡額外要求**：每格需附信心值 `confidence` (0~1)；無法判讀者填 `null` 而非猜測。
   嚴禁在遮蔽或字跡不清時推測數字——寧可留空讓人補，不可產生看似正確的錯誤資料。
 
@@ -156,82 +187,91 @@ OCR 是選配，手動輸入網格是必備。
 ## 開發階段
 
 1. ✅ `scoring.py` + `rules.yaml` — 規則程式化，含測試案例（2026-07-17 完成，見下）
-2. 🔶 `ocr_parse.py` — 程式與離線測試完成（2026-07-17）；**驗收待實際成績卡照片**
-   調 prompt，目標欄位辨識率 > 90%。實作決定：
-   - 以 structured outputs（`output_config.format` + JSON Schema）強制輸出格式，
-     model 預設 `claude-opus-4-8`（`OCR_MODEL` 環境變數或 `--model` 覆寫）
-   - iSwing / 手寫共用一支程式，`--card-type` 切換 prompt 與 schema；
-     手寫卡每格 `{value, confidence}`，後處理拆成桿數陣列 +
-     `low_confidence_holes`（< 0.8 標黃）/ `unreadable_holes`（null 標紅）
-   - 三重驗證由 rules.yaml `validation.checks` 驅動；任何 null 格 → 該列 `fail`
-   - 姓名以 difflib 對名冊模糊比對（cutoff 0.6），比對到者正規化並保留
-     `ocr_name` 原始字串；比對不到 → `is_guest: true`
-   - **多 provider 可切換**（2026-07-18）：`--provider anthropic|openai|gemini`
-     （預設 anthropic）。後處理三家共用，只有 API 呼叫層不同：anthropic 用
-     `output_config.format`、openai 用 `response_format.json_schema(strict)`、
-     gemini 用 `response_mime_type=json`（schema 由 prompt+後段驗證把關）。
-     金鑰各讀 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`，
-     未設定即明確報錯（讀圖前先擋）。admin.html 步驟①可選 provider，
-     ocr.yml 加 provider input 並注入三把 Secret。SDK 延遲 import，
-     測試不需安裝。換 provider 只動 ~30 行呼叫層，其餘不變。
-   - CLI：`python scripts/ocr_parse.py --rules rules.yaml --image <照片> \
-     --card-type iswing|handwritten --provider anthropic [--out pending/xxx.json]`；
-     驗證未全過 exit code 1
-   - 測試以 fixture input 反推驗證邏輯（實卡 11 列全 pass + 三項檢核竄改必抓）
-3. ✅ 兩支 Actions workflow 串接（2026-07-17 完成，見下）
-4. ✅ PWA 前端 — 全部完成（2026-07-17，第一回合手動路徑 + 第二回合閉環，見下）
+2. ✅ `ocr_parse.py` — 模組化完成（2026-07-21）；由 `/scorecard` 命令呼叫
+   - `scorecard_ocr(image_paths, card_type, rules, provider, model)` 函數
+   - 不處理 CLI 或檔案 I/O 邏輯（由 /scorecard 命令負責）
+   - 支援 iSwing / 手寫兩種卡型；多 provider 可切換
+   - 輸出 `pending/<date>_draft.json`；待實卡照片調校至 > 90% 辨識率
+3. ✅ `/scorecard` 命令規格（2026-07-21）：.claude/commands/scorecard.md
+   - 呼叫 `ocr_parse.scorecard_ocr()` 進行辨識
+   - 支援 `--card-type`, `--provider`, `--model`, `--rules` 等選項
+4. ✅ admin.html 完整流程（2026-07-21）：步驟①～⑤
+   - ① 日期選定 → 自動偵測 `pending/<date>_draft.json`
+   - ② 會員下拉 + 名字候選（不確定度排序）→ is_guest 標記
+   - ③ 逐洞輸入（OCR 預填或完全手 key 皆可）→ 色碼校對（綠/黃/紅）
+   - ④ 總表檢視
+   - ⑤ 近洞獎 + 同分裁定 → 人員摘要 + 發布
+5. ✅ score.yml workflow —— 確認稿 → 計分 → 獲獎 + 差點調整 → 發布
+   - 同分僵局：exit 2 中止、待手動裁定
+6. ✅ index.html 升級（2026-07-17）：最新例賽快報 + 差點走勢圖
 
-各階段可獨立驗收。**系統開發完工**；僅剩實照片調校（見「待補資料」）。
+**系統開發完工**；僅剩實照片調校（見「待補資料」）。
 
-## 階段 4 第二回合實作決定（2026-07-17：日常操作閉環 + 門面）
+## 階段 4 第二回合實作決定（2026-07-21：v2 OCR 架構 + 日常操作閉環）
 
-日常操作四步驟（上傳→校對→近洞獎/裁定→發布上網頁）全部閉環：
+日常操作四步驟（辨識→校對→獎項/裁定→發布）全部閉環：
 
-- **manual_tie_order 契約**（引擎小改）：match_input 選用欄位
-  `manual_tie_order: ["甲","乙"]`（前者名次較前）。「淨桿與差點皆同」的
-  兩人皆在列才解僵局並附 tie_break「總幹事裁定」；未涵蓋雙方仍
-  needs_manual_resolution 阻斷——程式永不自行排序。
-- **同分裁定介面＝發布前本地預檢**：admin.html 進入⑤時以名冊差點算淨桿
-  找「淨桿同且差點同」群組，顯示裁定卡（列差點供判斷、依名次順序點選），
-  未裁定完發布鈕鎖定。裁定寫入確認稿，不必等 workflow 失敗才處理。
-- **照片上傳**：步驟①選配面板——多選照片 PUT `scorecards/<date>/<檔名>`
-  → dispatch ocr.yml(image_dir, card_type)。上傳後點「載入辨識草稿」
-  GET pending/<date>_draft.json 預填（比對 courses 帶球場；比對不到轉自訂）。
-- **色碼校對**（設計要求 6）：綠=該列驗證 pass、黃=low_confidence_holes、
-  紅=unreadable null 格；人工改格即清該格標記；總表顯示「校對 n 格」。
-  OCR 純預填，任何格可覆寫，無草稿不影響手 key 路徑。
-- **近洞獎**：⑤會員 chips 複選 → `manual_awards.near_pin`（list 或 null）。
-- **manifest.json**：start_url admin.html（總幹事工具加主畫面）；
-  index.html 維持一般網頁。
-- **index.html 升級**：新增「最新例賽快報」（載入即顯示排名/獎項，
-  來賓標示、請假不列）；走勢圖加差點 dataset（右軸、虛線 accent）。
-- **驗收證據**（Playwright 五場景）：手 key 黃金比對回歸、OCR 預填三色碼
-  與補格清標記、裁定卡阻斷→點序→引擎依裁定排序（串驗 scoring.py）、
-  上傳請求形狀（PUT scorecards + ocr dispatch payload）、index 快報列數
-  與雙 dataset。pytest 38 項全綠。
+- **v2 OCR 架構**：移除 GitHub Actions 自動觸發，改用本地 `/scorecard` 命令
+  - 優點：開發迴圈快、無須等待 workflow、易除錯
+  - 總幹事執行：`/scorecard <照片> --card-type iswing` 後稍候 1-2 分鐘
+  - 產物：`pending/<date>_draft.json`
+- **draft 偵測與載入**：
+  - 步驟① 選日期時自動檢查 `pending/<date>_draft.json` 是否存在
+  - 若存在：顯示提示「偵測到未處理草稿」，點「載入辨識草稿」按鈕預填
+  - 載入規則：**只填空格，不覆寫已有輸入**（防止人工輸入被 OCR 覆蓋）
+- **名字候選**（不確定度排序）：
+  - OCR 辨識不確定時：提供候選列表（按相似度降序）
+  - 總幹事從下拉選單選定正確名字（含「新增來賓」選項）
+  - 選定後自動標記 is_guest / 清除 OCR metadata
+- **色碼校對**（設計要求 6）：
+  - 綠=驗證通過、黃=低信心（handwritten 卡）、紅=無法辨識或驗證失敗
+  - 人工改值後自動清除該格標記
+  - 總表顯示「待校對 n 格」提醒
+- **manual_tie_order 契約**（引擎）：match_input 選用欄位
+  `manual_tie_order: ["甲","乙"]`。「淨桿與差點皆同」的兩人皆在列才解僵局；
+  否則阻斷且不計算獎項。
+- **同分裁定介面**：步驟⑤發布前本地預檢
+  - 自動找出「淨桿同且差點同」群組
+  - 顯示裁定卡（列差點供判斷、依名次順序點選）
+  - 總幹事裁定後寫入確認稿 `manual_tie_order`，無需等待 workflow 失敗
+- **近洞獎**：步驟⑤會員複選 → `manual_awards.near_pin`
+- **人員摘要**：發布前確認 → 會員人數、排名對象、來賓標記
 
-## 階段 4 實作決定（2026-07-17，第一回合：手動輸入路徑）
+## 階段 4 實作決定（2026-07-21，前端改動：dropdown member + draft merge）
 
-`admin.html` 單檔（無建置流程），實現「完全沒有 OCR 也能手 key 完成整場」：
+`admin.html` 單檔（無建置流程），實現完全手 key 與 OCR 預填雙軌並行：
 
 - **設定來源**：fetch 同源 `rules.yaml` + js-yaml CDN 解析——名冊與球場
   不 hardcode 於前端。視覺沿用 index.html（Tailwind CDN、primary/accent）。
-- **五步驟精靈**：①場次（球場下拉自動帶 hole_pars；「其他球場」手動 par，
-  新球場不卡死）→ ②名單（會員按鈕勾選 + 來賓輸入）→ ③單人逐洞
-  （大鍵盤 1-9 單鍵即進即跳洞、10+ 兩位數、「照par」、⌫；18 格膠囊列
-  可點跳任一洞；前九/後九/總桿即時小計；18 洞完自動跳下一位未完成者）
-  → ④總表（紅底=未填，點列跳回補）→ ⑤發布。
+- **五步驟精靈**：
+  - ① 場次：日期 + 球場下拉（自動帶 hole_pars；「其他球場」手動 par、新球場不卡）
+    → 自動偵測 `pending/<date>_draft.json` 並顯示載入提示
+  - ② 名單：dropdown 選會員 + 新增來賓欄位 + is_guest checkbox
+    （原按鈕勾選改為 dropdown + add row/delete row 按鈕）；
+    載入 draft 時顯示名字候選（模糊比對不確定 → 提供相似度排序列表 + 新增來賓選項）
+  - ③ 逐洞：單人逐洞模式（大鍵盤、單鍵自動跳、前後九即時小計；18 格膠囊可點跳）
+  - ④ 總表：紅底=未填，點列回補
+  - ⑤ 發布：人員摘要 + 近洞獎 + 同分裁定 + 確認按鈕
+- **draft 載入**（merge 規則）：
+  - 檢查 player 是否已在 S.players（根據 rules.yaml 名冊比對）
+  - 若存在：保留其現有 scores，不覆寫（防止人工輸入遺失）
+  - 若不存在：新增 player 並填入 draft 的逐洞與驗證結果
+  - 名字不確定 → 填入 nameCandidates 供 ② 步驟展示下拉選單
 - **草稿**：每格輸入即寫 localStorage `gp9_draft`；重開頁偵測草稿詢問續作。
-- **發布**：組確認稿 JSON（totals/vs_par 自動計算、`validation: "pass"`、
-  `manual_awards.near_pin: null`，與引擎 input 完全同構）→
-  GitHub Contents API PUT `pending/<date>_confirmed.json`（已存在帶 sha 更新）
-  → dispatch `score.yml`。PAT 存 localStorage `gp9_pat`（⚙ 設定面板），
-  金鑰不進 repo。「下載 JSON」為無 PAT 備援。
-- **驗收證據**（Playwright 行動 viewport 端到端，腳本不進 repo）：
-  模擬 key 完 fixture 11 人 → 產出 JSON 與 fixture input 全欄位一致 →
-  直接餵 scoring.py 重現 expected 結果；reload 草稿 198 格不丟；
-  發布請求形狀（PUT + dispatch payload）正確。11 人共 198 次點擊
-  （每人 18 點、單鍵自動跳洞），估算 ≈5 分鐘 < 10 分鐘驗收線。
+- **色碼校對**（draft 且 validation/low_confidence 非空時）：
+  - 載入 draft 時標記格子顏色（綠=pass、黃=low_confidence、紅=unreadable/fail）
+  - 人工改值即自動清除該格標記
+- **發布**：組確認稿 JSON（逐洞/totals/vs_par 自動計算、validation 計算、
+  manual_awards.near_pin/manual_tie_order 從 UI 讀取）→
+  GitHub Contents API PUT `pending/<date>_confirmed.json` →
+  dispatch `score.yml`。PAT 存 localStorage `gp9_pat`（⚙ 設定面板），
+  金鑰不進 repo。
+- **驗收證據**（Playwright 行動 viewport 端到端）：
+  - 手 key 黃金路徑（無 draft）198 格完整填入 → 產出 JSON 吻合 fixture
+  - draft 載入 + merge 規則（既存 player 保留 scores）
+  - 名字候選與相似度排序、選定後 is_guest 正確
+  - 色碼標記與手動改值清標
+  - 同分裁定卡 + manual_tie_order 寫入確認稿 → 餵 scoring.py 無阻斷
 
 ## 階段 3 實作決定（2026-07-17）
 
@@ -252,14 +292,12 @@ OCR 是選配，手動輸入網格是必備。
   `所獲獎項` 固定順序 `近洞獎、總桿冠、淨桿冠、幸運獎、Eagle獎` 以「、」串接。
 - **冪等**：同日期賽事整批替換後依日期排序，重跑安全。
 - **同分僵局**：publish.py exit 2、不寫任何檔案；score.yml 據此 job fail。
-- **workflow 觸發**：兩支皆 `workflow_dispatch`（供 admin.html 以 GitHub API
-  觸發），不做 push 自動觸發（避免多張照片分次上傳重複跑辨識）。
-  - `ocr.yml` inputs：`image_dir`（整個資料夾餵同一次辨識）、`card_type`。
-    ocr_parse exit 1（有紅字）不視為失敗，草稿照 commit，summary 提示校對。
-  - `score.yml` inputs：`input_path`（確認稿，引擎 input 格式）。
+- **workflow 觸發**：`score.yml` 採 `workflow_dispatch`（由 admin.html 以 GitHub API
+  觸發），發布時自動調用。
+  - `score.yml` inputs：`input_path`（確認稿路徑，引擎 input 格式）。
     發布前先跑 pytest 守門；成功後刪除該場確認稿與同日期 `*_draft.json`。
 - **待辦**：repo Settings → Secrets 需由總幹事加入 `ANTHROPIC_API_KEY`
-  （金鑰只在 Actions 內使用）；Actions 實跑驗證待照片階段一併進行。
+  （金鑰用於 `/scorecard` 命令）；Actions 實跑驗證待照片階段一併進行。
 
 ## 階段 1 實作決定（2026-07-17）
 
@@ -314,8 +352,8 @@ admin.html 需提供裁定介面（顯示雙方差點供判斷，總幹事指定
 ## 待補資料
 
 - [ ] 補登其他常打球場的每洞 par（rules.yaml courses 區塊）
-- [ ] iSwing 是否提供匯出功能（若有，OCR 層可簡化為 fallback）
-- [ ] repo Settings → Secrets 加入 `ANTHROPIC_API_KEY`（ocr.yml 需要）
+- [ ] repo Settings → Secrets 加入 `ANTHROPIC_API_KEY`（/scorecard 命令需要）
 - [ ] 確認 GitHub Pages 設定為 main branch 部署（score.yml push 後自動更新網頁）
-- [ ] **實照片調校**：拿實際 iSwing / 手寫成績卡跑 ocr.yml，調 prompt 至
+- [ ] **實照片調校**：拿實際 iSwing / 手寫成績卡跑 `/scorecard` 命令，調 prompt 至
   欄位辨識率 > 90%（全系統唯一未驗收項）
+- [ ] 驗證 /scorecard 命令完整流程（draft 生成 → admin.html 載入 → 校對 → 發布）
