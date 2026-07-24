@@ -31,6 +31,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 
 import yaml
 
@@ -381,7 +382,9 @@ def scorecard_ocr(image_paths, card_type, rules, provider=DEFAULT_PROVIDER,
     draft = parse_scorecard(image_paths, card_type, rules,
                            provider=provider, model=model)
 
-    date = draft.get("date") or "unknown-date"
+    # 手寫卡常辨識不出日期：以時間戳記命名避免同一天多張辨識不出日期的
+    # 草稿互相覆蓋（admin.html 不再依檔名比對日期，改由總幹事在清單中挑選）。
+    date = draft.get("date") or f"unknown-{int(time.time())}"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"{date}_draft.json")
 

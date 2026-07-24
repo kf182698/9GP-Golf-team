@@ -57,10 +57,16 @@
 
 ## 流程
 
-1. admin.html 步驟① 日期選定後 detectDraft() 檢查是否已有 `pending/<date>_draft.json`
-2. 若無草稿，總幹事可執行本命令上傳照片：`/scorecard <照片> --card-type iswing`
-3. 稍候 1-2 分鐘後，admin.html 步驟② 點「載入辨識草稿」按鈕
-4. applyDraft() 載入 `pending/<date>_draft.json`，填入空格、顯示名字候選、標出低信心格
+**辨識只透過本命令（Claude Code）進行，不再有 GitHub Actions 觸發辨識的路徑。**
+
+1. 總幹事於本機執行本命令上傳照片：`/scorecard <照片> --card-type iswing`
+2. 產出的 `pending/<date>_draft.json`（手寫卡辨識不出日期時檔名為
+   `pending/unknown-<timestamp>_draft.json`）commit + push 到 GitHub main
+3. admin.html 步驟①「辨識草稿」區塊會列出 `pending/` 目錄下所有草稿檔案供選擇——
+   **不依賴檔名或草稿內容的日期比對**，因為手寫卡常連日期都辨識不出來
+4. 總幹事從清單挑選正確的草稿檔案，點「載入所選草稿」；
+   `applyDraft()` 填入空格、顯示名字候選、標出低信心格，**但不會覆寫比賽日期**——
+   比賽日期一律以步驟①上方欄位為準，須由總幹事自行選定/確認
 5. 總幹事校對並手動修正，然後發布確認稿
 
 ## 設計原則
@@ -80,5 +86,5 @@
 ## 參考
 
 - `scripts/ocr_parse.py::scorecard_ocr()` ：實現函數
-- `admin.html::detectDraft()` ：草稿偵測
-- `admin.html::applyDraft()` ：校對載入與名字候選
+- `admin.html::refreshDraftList()` ：列出 pending/ 草稿清單供選擇
+- `admin.html::applyDraft()` ：校對載入與名字候選（不覆寫比賽日期）
