@@ -207,6 +207,32 @@ Draft schema 如下：
 
 **系統開發完工**；僅剩實照片調校（見「待補資料」）。
 
+## 階段 4 第三回合實作決定（2026-07-24：草稿選取與日期主權修正）
+
+- **辨識僅透過 Claude Code（`/scorecard`）**：刪除已停用但殘留的
+  `.github/workflows/ocr.yml`（v2 架構早已決定移除 Actions 自動觸發辨識，
+  但檔案沒清掉；`tests/test_publish.py` 早就寫著「ocr.yml moved to local
+  /scorecard command」卻沒人真的刪檔）。辨識流程只剩一條路：總幹事在本機
+  跑 `/scorecard`，產物 commit + push 上 GitHub。
+- **修正 admin.html「載入辨識草稿」按鈕完全無法點擊的 bug**：
+  `renderStep1()` 綁定事件時依序執行到 `$("fCardType").onchange = ...` 與
+  `$("fProvider").onchange = ...`，但這兩個輸入框在目前版面早就不存在
+  （v1 時代殘留，OCR provider/card-type 選擇已移到 `/scorecard` 指令本身）。
+  對 `null` 設定 `.onchange` 會丟例外，導致下一行
+  `$("draftBtn").onclick = loadDraft` 永遠執行不到——按鈕從頭到尾沒有綁定
+  點擊事件。移除這兩行殘留綁定。
+- **草稿載入改為清單選取，不再依日期比對檔名**：原本邏輯是「目前選定的
+  比賽日期」去猜 `pending/${日期}_draft.json` 檔名，手寫卡經常連日期都
+  辨識不出來（`ocr_parse.py` 會退回 `unknown-<timestamp>_draft.json`），
+  這種猜測必然落空。改為 `refreshDraftList()` 直接列出 `pending/` 目錄下
+  所有 `*_draft.json` 供總幹事挑選，與目前日期欄位無關。
+- **比賽日期主權回到總幹事**：`applyDraft()` 不再用草稿內的 `date` 覆寫
+  `S.date`；草稿辨識到的日期只在載入後的提示訊息顯示供參考。日期永遠是
+  步驟①欄位裡總幹事自己選定/確認的值，不受 OCR 結果影響。
+- `ocr_parse.py::scorecard_ocr()`：辨識不到日期時的檔名從固定字串
+  `unknown-date_draft.json` 改成 `unknown-<unix time>_draft.json`，避免
+  同一天多張辨識不出日期的草稿互相覆蓋。
+
 ## 階段 4 第二回合實作決定（2026-07-21：v2 OCR 架構 + 日常操作閉環）
 
 日常操作四步驟（辨識→校對→獎項/裁定→發布）全部閉環：

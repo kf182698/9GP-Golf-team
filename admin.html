@@ -180,15 +180,22 @@ function renderStep1() {
 
   <div class="bg-white rounded-xl shadow p-4 mt-4 space-y-3">
     <h2 class="font-bold text-primary">📋 辨識草稿（選用——若無草稿可直接手動輸入）</h2>
-    <div id="draftAlert" class="hidden bg-blue-50 border border-blue-300 rounded-lg p-3 text-sm text-blue-800">
-      ℹ️ 偵測到 <span id="draftDate"></span> 的未處理草稿，可按下方按鈕載入預填
+    <div class="text-xs text-gray-500 leading-relaxed">
+      草稿只由總幹事在本機以 Claude Code 執行 <code>/scorecard</code> 指令產生，merge 進 GitHub 後才會出現在下方清單。
+      手寫卡常常連日期都辨識不出來，草稿檔名/內容的日期僅供參考——比賽日期一律以上方欄位為準，請自行確認。
     </div>
-    <button id="draftBtn" class="w-full bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700">⬇ 載入辨識草稿（pending/${S.date}_draft.json）</button>
+    <div>
+      <label class="text-sm font-semibold text-gray-600">選擇草稿檔案</label>
+      <select id="draftSelect" class="w-full border rounded-lg p-3 mt-1 bg-white">
+        <option value="">（讀取中…）</option>
+      </select>
+    </div>
+    <button id="draftBtn" class="w-full bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700" disabled>⬇ 載入所選草稿</button>
     <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
   </div>
   ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
 
-  $("fDate").onchange = e => { S.date = e.target.value; save(); detectDraft(); };
+  $("fDate").onchange = e => { S.date = e.target.value; save(); render(); };
   $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
   if (isCustom) {
     $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
@@ -205,9 +212,44 @@ function renderStep1() {
     $("courseInfo").innerHTML =
       `區域：${S.nineNames[0]} / ${S.nineNames[1]}　·　每洞 par 已自動帶入，輸入時可一鍵「照par」`;
   }
-  $("fCardType").onchange = e => { S.cardType = e.target.value; save(); };
-  $("fProvider").onchange = e => { S.provider = e.target.value; save(); };
   $("draftBtn").onclick = loadDraft;
+  refreshDraftList();
+}
+
+// 列出 pending/ 目錄下所有草稿檔案供總幹事挑選。刻意不綁定目前選定的比賽日期——
+// 手寫卡常辨識不出日期、檔名不可靠，一律由總幹事自行比對卡片挑選正確草稿。
+async function refreshDraftList() {
+  const sel = $("draftSelect");
+  const btn = $("draftBtn");
+  if (!sel || !btn) return;
+  if (!localStorage.getItem(PAT_KEY)) {
+    sel.innerHTML = `<option value="">（先點右上角 ⚙ 設定 PAT 才能讀取草稿）</option>`;
+    btn.disabled = true;
+    return;
+  }
+  sel.innerHTML = `<option value="">讀取中…</option>`;
+  btn.disabled = true;
+  try {
+    const res = await ghFetch(`/repos/${REPO}/contents/pending?ref=${BRANCH}`);
+    if (!sel.isConnected) return;   // 使用者已切換畫面，結果作廢
+    if (res.status === 404) {
+      sel.innerHTML = `<option value="">（目前沒有草稿，可直接手動輸入）</option>`;
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const files = (await res.json())
+      .filter(f => f.type === "file" && f.name.endsWith("_draft.json"))
+      .sort((a, b) => b.name.localeCompare(a.name));
+    if (files.length === 0) {
+      sel.innerHTML = `<option value="">（目前沒有草稿，可直接手動輸入）</option>`;
+      return;
+    }
+    sel.innerHTML = `<option value="">— 請選擇草稿 —</option>` +
+      files.map(f => `<option value="${f.path}">${f.name}</option>`).join("");
+    btn.disabled = false;
+  } catch (e) {
+    sel.innerHTML = `<option value="">讀取草稿列表失敗（${e.message}）</option>`;
+  }
 }
 
 // ------------------ 載入 OCR 草稿 → 預填 + 色碼 ------------------
@@ -216,31 +258,20 @@ async function loadDraft() {
   const log = m => { $("ocrLog").textContent += m + "\n"; };
   $("ocrLog").textContent = "";
   if (!localStorage.getItem(PAT_KEY)) return openPat();
+  const path = $("draftSelect")?.value;
+  if (!path) { log("請先在上方選擇要載入的草稿檔案"); return; }
   try {
-    const path = `pending/${S.date}_draft.json`;
     const res = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
-    if (!res.ok) throw new Error(`找不到 ${path}（HTTP ${res.status}）——辨識可能尚未完成`);
+    if (!res.ok) throw new Error(`找不到 ${path}（HTTP ${res.status}）`);
     const body = await res.json();
     const draft = JSON.parse(decodeURIComponent(escape(atob(body.content.replace(/\n/g, "")))));
     applyDraft(draft);
     render();   // 先重繪（會清掉 #ocrLog），再寫結果訊息
     log(`✓ 已預填 ${draft.players.length} 位球員。黃格=低信心、紅格=無法辨識，請逐格校對；任何格都可覆寫。`);
+    log(draft.date
+      ? `ℹ 草稿內辨識到的比賽日期為 ${draft.date}，僅供參考，請確認上方「比賽日期」是否正確。`
+      : `⚠ 草稿未能辨識出比賽日期，請務必自行選擇上方「比賽日期」。`);
   } catch (e) { log(`❌ ${e.message}`); }
-}
-
-// 自動偵測該日期是否有未處理草稿，若有顯示提示條
-async function detectDraft() {
-  if (!localStorage.getItem(PAT_KEY)) return;  // 沒 PAT 無法檢查
-  const path = `pending/${S.date}_draft.json`;
-  try {
-    const res = await ghFetch(`/repos/${REPO}/contents/${path}?ref=${BRANCH}`);
-    if (res.ok) {
-      $("draftAlert")?.classList.remove("hidden");
-      $("draftDate").textContent = S.date;
-    } else {
-      $("draftAlert")?.classList.add("hidden");
-    }
-  } catch (_) { $("draftAlert")?.classList.add("hidden"); }
 }
 
 // 半場桿數強制補齊/截斷至剛好 9 格（OCR 漏辨識或格式異常時，
@@ -251,7 +282,8 @@ function nineCells(arr) {
 }
 
 function applyDraft(draft) {
-  if (draft.date) S.date = draft.date;
+  // 比賽日期刻意不從草稿帶入——手寫卡常辨識不出日期，草稿內的值不可靠，
+  // 一律以總幹事在上方欄位手動選定/確認的日期為準（見 loadDraft 的提示訊息）。
   // 球場：比對 courses 名稱；比對不到 → 自訂（帶草稿的 hole_pars）
   const c = (rules.courses || []).find(c =>
     c.name === draft.course || (c.aliases || []).includes(draft.course));
