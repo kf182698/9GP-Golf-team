@@ -101,11 +101,12 @@ def test_awards(result):
 
 
 def test_lucky_share_parity(result):
-    """淨桿冠軍淨桿 71 為單數 → 排名 1,3,5,7 得獎，每人 200。"""
+    """淨桿冠軍淨桿 71 為單數 → 排名 1,3,5,7 落在名次內，但排名 1 已得淨桿冠軍
+    不重複得幸運分享獎 → 實際得獎 3,5,7，每人 200。"""
     lucky = result["awards"]["lucky_share"]
     assert lucky["parity_basis"] == 71
     assert lucky["parity"] == "odd"
-    assert lucky["winners"] == ["陳淂笙", "王建亞", "洪榮杰", "黃予安"]
+    assert lucky["winners"] == ["王建亞", "洪榮杰", "黃予安"]
     assert lucky["prize_each"] == 200
 
 
@@ -163,9 +164,10 @@ def test_manual_tie_order_resolves_deadlock(rules, match_input):
     # 淨桿 75 兩人依裁定：曹勇良在前
     assert names.index("曹勇良") < names.index("黃予安")
     assert result["net_ranking"][names.index("曹勇良")]["net"] == 75
-    # 幸運分享獎依裁定後的排名計算（冠軍 71 單數 → 1,3,5,7）
+    # 幸運分享獎依裁定後的排名計算（冠軍 71 單數 → 1,3,5,7，但排名 1 已得淨桿冠軍不重複得獎）
     lucky = result["awards"]["lucky_share"]["winners"]
-    assert lucky == [r["name"] for r in result["net_ranking"] if r["rank"] % 2 == 1]
+    assert lucky == [r["name"] for r in result["net_ranking"]
+                      if r["rank"] % 2 == 1 and r["rank"] != 1]
     # 反向裁定 → 順序跟著反
     tampered["manual_tie_order"] = ["黃予安", "曹勇良"]
     result2 = score(tampered_rules, tampered)
@@ -245,6 +247,15 @@ def test_eagle_multiple_per_player(rules, match_input):
     eagles = result["awards"]["eagle"]["winners"]
     assert [(e["name"], e["hole"]) for e in eagles] == [("王建亞", 3), ("王建亞", 10)]
     assert all(e["prize"] == "ball x2" for e in eagles)
+
+
+def test_lucky_share_both_opt_in(rules, match_input):
+    """exclusivity.net_and_lucky_share 設回 "both" → 排名 1 恢復重複得幸運分享獎。"""
+    tampered_rules = copy.deepcopy(rules)
+    tampered_rules["exclusivity"]["net_and_lucky_share"] = "both"
+    result = score(tampered_rules, match_input)
+    lucky = result["awards"]["lucky_share"]
+    assert lucky["winners"] == ["陳淂笙", "王建亞", "洪榮杰", "黃予安"]
 
 
 def test_lucky_share_even_parity(rules, match_input):

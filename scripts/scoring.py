@@ -144,23 +144,35 @@ def compute_gross_champion(members, cfg, prior_winners=None):
             "note": "所有會員年度皆已領取"}
 
 
-def compute_lucky_share(ranking, cfg):
-    """幸運分享獎：依淨桿冠軍淨桿單雙決定得獎名次（單→1,3,5…；雙→2,4,6…）。"""
+def compute_lucky_share(ranking, cfg, exclude_champion=True):
+    """幸運分享獎：依淨桿冠軍淨桿單雙決定得獎名次（單→1,3,5…；雙→2,4,6…）。
+
+    exclude_champion：rules.yaml「exclusivity.net_and_lucky_share」若非 "both"，
+    淨桿冠軍（排名 1）已得淨桿冠獎，即使排名單雙落在幸運分享獎名次內也不重複得獎，
+    名次序列本身不變（不遞補），僅排名 1 從得獎名單移除。
+    """
     basis = ranking[0]["net"]
     parity = "odd" if basis % 2 == 1 else "even"
     start = 1 if parity == "odd" else 2
-    winners = [r["name"] for r in ranking if r["rank"] % 2 == start % 2]
     winner_ranks = [r["rank"] for r in ranking if r["rank"] % 2 == start % 2]
+    excluded_rank = None
+    if exclude_champion and 1 in winner_ranks:
+        winner_ranks = [rk for rk in winner_ranks if rk != 1]
+        excluded_rank = 1
+    winners = [r["name"] for r in ranking if r["rank"] in winner_ranks]
     parity_zh = "單數" if parity == "odd" else "雙數"
+    note = (
+        f"淨桿冠軍淨桿 {basis} 為{parity_zh} → "
+        f"淨桿排名 {','.join(map(str, winner_ranks))} 得獎"
+    )
+    if excluded_rank:
+        note += "（排名 1 已得淨桿冠軍，依規則不重複得幸運分享獎）"
     return {
         "parity_basis": basis,
         "parity": parity,
         "winners": winners,
         "prize_each": cfg["prize"]["amount"],
-        "note": (
-            f"淨桿冠軍淨桿 {basis} 為{parity_zh} → "
-            f"淨桿排名 {','.join(map(str, winner_ranks))} 得獎"
-        ),
+        "note": note,
     }
 
 
@@ -261,6 +273,7 @@ def score(rules, match_input, prior_gross_winners=None):
     eagle_cfg = award_config(rules, "eagle")
 
     champion = ranking[0]
+    net_and_lucky_share = rules.get("exclusivity", {}).get("net_and_lucky_share", "exclude")
     awards = {
         "gross_champion": compute_gross_champion(
             members, gross_champ_cfg, prior_gross_winners
@@ -270,7 +283,9 @@ def score(rules, match_input, prior_gross_winners=None):
             "net": champion["net"],
             "prize": format_prize(net_champ_cfg["prize"]),
         },
-        "lucky_share": compute_lucky_share(ranking, lucky_cfg),
+        "lucky_share": compute_lucky_share(
+            ranking, lucky_cfg, exclude_champion=(net_and_lucky_share != "both")
+        ),
         "eagle": compute_eagle(members, match_input["hole_pars"], eagle_cfg),
         "near_pin": {
             "winner": match_input.get("manual_awards", {}).get("near_pin"),

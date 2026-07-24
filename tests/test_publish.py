@@ -71,10 +71,10 @@ def test_publish_builds_full_roster_rows(sandbox, capsys):
     # 例賽名稱用 courses aliases 短名
     assert rows[0]["例賽名稱"] == "2025年06月例賽（桃園）"
 
-    # 冠軍列抽查：淨桿冠 + 幸運獎（近洞獎 null 不出現），固定順序
+    # 冠軍列抽查：僅淨桿冠（排名 1 已得淨桿冠，依規則不重複得幸運分享獎），固定順序
     champ = by_name["陳淂笙"]
     assert (champ["名次"], champ["差點"], champ["總桿數"], champ["淨桿數"]) == (1, 16, 87, 71)
-    assert champ["所獲獎項"] == "淨桿冠、幸運獎"
+    assert champ["所獲獎項"] == "淨桿冠"
     # 總桿冠 + 幸運獎
     assert by_name["王建亞"]["所獲獎項"] == "總桿冠、幸運獎"
     # 無獎者為 null
