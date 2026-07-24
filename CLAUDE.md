@@ -207,6 +207,21 @@ Draft schema 如下：
 
 **系統開發完工**；僅剩實照片調校（見「待補資料」）。
 
+## 階段 4 第四回合實作決定（2026-07-24：草稿清單新增手動刪除）
+
+- **問題**：`score.yml` 發布成功後只會用確認稿的 `date` 去 glob
+  `pending/${date}*_draft.json` 清掉「同日期」草稿；`unknown-<timestamp>_draft.json`
+  （手寫卡辨識不出日期時的檔名，見上一輪決定）檔名對不上任何實際比賽日期，
+  永遠不會被自動清掉。加上重複上傳、校對後放棄的草稿，`pending/` 會隨使用時間
+  持續累積。
+- **解法**：草稿選取清單旁加「🗑 刪除」按鈕，直接呼叫 GitHub Contents API
+  `DELETE /repos/{repo}/contents/{path}`（既有 PAT 已具備 Contents 讀寫權限，
+  不需額外授權）。刪除前 `confirm()` 二次確認、刪除只影響 `pending/` 底下的
+  草稿檔案，不觸碰 `golf_scores.json`／`rules.yaml`。刪除的 `sha` 取自
+  `refreshDraftList()` 抓清單時 GitHub API 回傳的值（放在 `<option data-sha>`）。
+- 未做自動清理（例如定期清空舊草稿）：草稿是否該留由總幹事人工判斷
+  （例如尚未校對完成的草稿不該被自動清掉），符合「人工確認不可省」原則。
+
 ## 階段 4 第三回合實作決定（2026-07-24：草稿選取與日期主權修正）
 
 - **辨識僅透過 Claude Code（`/scorecard`）**：刪除已停用但殘留的
