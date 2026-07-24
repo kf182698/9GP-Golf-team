@@ -207,7 +207,7 @@ def publish(rules_path, input_path, scores_path, dry_run=False):
     for r in result["net_ranking"]:
         award = next((row["所獲獎項"] for row in new_rows
                       if row["球員姓名"] == r["name"]), None)
-        lines.append(f"{r['rank']}. {r['name']} 總桿 {r['gross']} 淨桿 {r['net']}"
+        lines.append(f"{r['rank']}. {r['name']} 總桿 {r['gross']} 差點 {r['handicap']} 淨桿 {r['net']}"
                      + (f"　🏆 {award}" if award else ""))
     if result.get("excluded_guests"):
         lines.append(f"\n來賓（不列入排名）：{'、'.join(result['excluded_guests'])}")
