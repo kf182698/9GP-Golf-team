@@ -30,9 +30,13 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures"
 INPUT = FIXTURES / "2025-06-21_taoyuan_input.json"
 
 
+# 金標 fixture 用的凍結規則快照（含 fixture 期差點），與活的 rules.yaml 脫鉤
+FIXTURE_RULES = FIXTURES / "2025-06-21_taoyuan_rules.yaml"
+
+
 @pytest.fixture()
 def rules():
-    return load_rules(REPO_ROOT / "rules.yaml")
+    return load_rules(FIXTURE_RULES)
 
 
 @pytest.fixture()
@@ -41,7 +45,7 @@ def sandbox(tmp_path):
     rules_path = tmp_path / "rules.yaml"
     scores_path = tmp_path / "golf_scores.json"
     input_path = tmp_path / "confirmed.json"
-    shutil.copy(REPO_ROOT / "rules.yaml", rules_path)
+    shutil.copy(FIXTURE_RULES, rules_path)
     scores_path.write_text("[]", encoding="utf-8")
     shutil.copy(INPUT, input_path)
     return rules_path, scores_path, input_path
