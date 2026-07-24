@@ -181,9 +181,9 @@ validation:
 # 差點基準日: 2026-05-22
 # 同分第二順位（年齡）由總幹事手動裁定，故名冊不儲存出生年月日
 players:
-  - { name: "曹勇良", handicap: 36 }
-  - { name: "曾吟芳", handicap: 36 }
-  - { name: "林家進", handicap: 22 }
+  - { name: "曹勇良", handicap: 32 }
+  - { name: "曾吟芳", handicap: 33 }
+  - { name: "林家進", handicap: 21 }
   - { name: "何崇華", handicap: 24 }
   - { name: "陳淂笙", handicap: 16 }
   - { name: "陳奕仲", handicap: 20 }
