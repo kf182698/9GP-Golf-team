@@ -31,7 +31,9 @@ def strip_prose(obj):
 
 @pytest.fixture(scope="module")
 def rules():
-    return load_rules(REPO_ROOT / "rules.yaml")
+    # 讀凍結快照而非活的 rules.yaml：名冊差點每場會被扣減更新，金標 fixture
+    # 必須固定在其驗證當下的差點，否則正常的差點調整會誤傷測試。
+    return load_rules(FIXTURES / "2025-06-21_taoyuan_rules.yaml")
 
 
 @pytest.fixture(scope="module")
