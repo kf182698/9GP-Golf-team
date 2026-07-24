@@ -335,19 +335,27 @@ function applyDraft(draft) {
   S.players = (draft.players || []).map(p => {
     const existing = S.players.find(sp => sp.name === p.name);
     const scores = existing ? existing.scores : [...nineCells(p.front_9), ...nineCells(p.back_9)];
-    // 名字匹配：uncertain/unmatched 才需要候選選項
+    // 名字匹配：uncertain/unmatched 才需要候選選項。
+    // p.name_candidates 是 CLAUDE.md schema 定義的「已排版好」字串陣列
+    // （如 "王建亞 95%"、"新增來賓：王建亚"）——不是純姓名，選中後寫入
+    // S.players[i].name 前必須先拆出乾淨姓名，否則選單值會整串帶著「 95%」污染資料。
     let nameCandidates = [];
     if (p.name_match === "uncertain" && p.name_candidates) {
-      nameCandidates = p.name_candidates.map((c, i) => ({
-        name: c, sim: p.name_similarities?.[i] || 0.6, isCandidate: true
-      }));
-      nameCandidates.sort((a, b) => b.sim - a.sim);  // 按相似度排序
+      nameCandidates = p.name_candidates.map(c => {
+        if (c.startsWith("新增來賓：")) return { name: c.slice(5), label: c, isGuest: true };
+        const m = c.match(/^(.+?)\s+(\d+)%$/);
+        return m ? { name: m[1], label: c, sim: +m[2] / 100, isCandidate: true }
+                  : { name: c, label: c, isCandidate: true };
+      });
+      nameCandidates.sort((a, b) => (b.sim || 0) - (a.sim || 0));  // 按相似度排序
       const other = roster.filter(n => !nameCandidates.some(x => x.name === n));
-      nameCandidates.push(...other.map(n => ({ name: n, sim: 0, isCandidate: false })));
-      nameCandidates.push({ name: "新增來賓：" + p.name, sim: 0, isGuest: true });
+      nameCandidates.push(...other.map(n => ({ name: n, label: n, isCandidate: false })));
+      if (!nameCandidates.some(x => x.isGuest)) {
+        nameCandidates.push({ name: "新增來賓：" + (p.ocr_name || p.name), label: "新增來賓：" + (p.ocr_name || p.name), isGuest: true });
+      }
     } else if (p.name_match === "unmatched") {
-      nameCandidates.push({ name: "新增來賓：" + p.name, sim: 0, isGuest: true });
-      nameCandidates.push(...roster.map(n => ({ name: n, sim: 0, isCandidate: false })));
+      nameCandidates.push({ name: "新增來賓：" + p.name, label: "新增來賓：" + p.name, isGuest: true });
+      nameCandidates.push(...roster.map(n => ({ name: n, label: n, isCandidate: false })));
     }
     return {
       name: p.name,
@@ -399,8 +407,7 @@ function renderStep2() {
             <select data-i="${i}" class="candSel flex-1 border rounded p-2 text-sm">
               <option value="">選擇…</option>
               ${p.nameCandidates.map(c => {
-                const label = c.isGuest ? c.name : (c.isCandidate ? `${c.name} ${Math.round(c.sim * 100)}%` : c.name);
-                return `<option value="${c.name}" data-guest="${!!c.isGuest}">${label}</option>`;
+                return `<option value="${c.name}" data-guest="${!!c.isGuest}">${c.label || c.name}</option>`;
               }).join("")}
             </select>
           ` : `
