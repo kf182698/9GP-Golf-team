@@ -190,7 +190,10 @@ function renderStep1() {
         <option value="">（讀取中…）</option>
       </select>
     </div>
-    <button id="draftBtn" class="w-full bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700" disabled>⬇ 載入所選草稿</button>
+    <div class="flex gap-2">
+      <button id="draftBtn" class="flex-1 bg-gray-100 rounded-lg py-2 text-sm font-semibold text-gray-700" disabled>⬇ 載入所選草稿</button>
+      <button id="draftDelBtn" class="px-4 bg-red-50 text-accent rounded-lg py-2 text-sm font-semibold" disabled title="刪除所選草稿檔案（不影響已發布成績）">🗑 刪除</button>
+    </div>
     <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
   </div>
   ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
@@ -213,22 +216,27 @@ function renderStep1() {
       `區域：${S.nineNames[0]} / ${S.nineNames[1]}　·　每洞 par 已自動帶入，輸入時可一鍵「照par」`;
   }
   $("draftBtn").onclick = loadDraft;
+  $("draftDelBtn").onclick = deleteSelectedDraft;
   refreshDraftList();
 }
 
 // 列出 pending/ 目錄下所有草稿檔案供總幹事挑選。刻意不綁定目前選定的比賽日期——
 // 手寫卡常辨識不出日期、檔名不可靠，一律由總幹事自行比對卡片挑選正確草稿。
+// 每個 <option> 帶 data-sha，供 deleteSelectedDraft() 呼叫 Contents API 刪除時使用。
 async function refreshDraftList() {
   const sel = $("draftSelect");
   const btn = $("draftBtn");
-  if (!sel || !btn) return;
+  const delBtn = $("draftDelBtn");
+  if (!sel || !btn || !delBtn) return;
   if (!localStorage.getItem(PAT_KEY)) {
     sel.innerHTML = `<option value="">（先點右上角 ⚙ 設定 PAT 才能讀取草稿）</option>`;
     btn.disabled = true;
+    delBtn.disabled = true;
     return;
   }
   sel.innerHTML = `<option value="">讀取中…</option>`;
   btn.disabled = true;
+  delBtn.disabled = true;
   try {
     const res = await ghFetch(`/repos/${REPO}/contents/pending?ref=${BRANCH}`);
     if (!sel.isConnected) return;   // 使用者已切換畫面，結果作廢
@@ -244,12 +252,40 @@ async function refreshDraftList() {
       sel.innerHTML = `<option value="">（目前沒有草稿，可直接手動輸入）</option>`;
       return;
     }
-    sel.innerHTML = `<option value="">— 請選擇草稿 —</option>` +
-      files.map(f => `<option value="${f.path}">${f.name}</option>`).join("");
+    sel.innerHTML = `<option value="">— 請選擇草稿（共 ${files.length} 筆）—</option>` +
+      files.map(f => `<option value="${f.path}" data-sha="${f.sha}">${f.name}</option>`).join("");
     btn.disabled = false;
+    delBtn.disabled = false;
   } catch (e) {
     sel.innerHTML = `<option value="">讀取草稿列表失敗（${e.message}）</option>`;
   }
+}
+
+// 刪除所選草稿檔案（僅刪 pending/ 底下的辨識草稿，不影響已發布的 golf_scores.json）。
+// 用途：清掉手寫卡辨識不出日期產生的 unknown-<timestamp>_draft.json（score.yml
+// 發布後只會自動清掉與確認稿同日期的草稿，這類檔名對不上，永遠不會被自動清掉）、
+// 重複上傳的照片、或校對後決定不用的草稿。
+async function deleteSelectedDraft() {
+  const log = m => { $("ocrLog").textContent += m + "\n"; };
+  if (!localStorage.getItem(PAT_KEY)) return openPat();
+  const sel = $("draftSelect");
+  const opt = sel?.selectedOptions[0];
+  const path = sel?.value;
+  if (!path) { $("ocrLog").textContent = ""; log("請先在上方選擇要刪除的草稿檔案"); return; }
+  if (!confirm(`確定要刪除「${opt.textContent}」嗎？\n此操作無法復原（若尚未校對發布，辨識結果會直接遺失）。`)) return;
+  $("ocrLog").textContent = "";
+  try {
+    const res = await ghFetch(`/repos/${REPO}/contents/${path}`, {
+      method: "DELETE",
+      body: JSON.stringify({
+        message: `admin: 刪除草稿 ${path}`,
+        sha: opt.dataset.sha, branch: BRANCH,
+      }),
+    });
+    if (!res.ok) throw new Error(`刪除失敗 HTTP ${res.status}：${(await res.json()).message || ""}`);
+    log(`✓ 已刪除 ${path}`);
+    refreshDraftList();
+  } catch (e) { log(`❌ ${e.message}`); }
 }
 
 // ------------------ 載入 OCR 草稿 → 預填 + 色碼 ------------------
