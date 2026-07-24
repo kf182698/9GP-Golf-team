@@ -119,6 +119,7 @@ async function boot() {
   }
   if (!S) S = newState();
   render();
+  detectDraft();
 }
 
 // ------------------ 共用 render ------------------
@@ -188,7 +189,7 @@ function renderStep1() {
   </div>
   ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
 
-  $("fDate").onchange = e => { S.date = e.target.value; save(); detectDraft(); };
+  $("fDate").onchange = e => { S.date = e.target.value; save(); render(); detectDraft(); };
   $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
   if (isCustom) {
     $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
