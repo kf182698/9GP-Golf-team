@@ -664,6 +664,111 @@ function tiesResolved() {
   return tieGroups().every(g => g.every(m => S.manualTieOrder.includes(m.name)));
 }
 
+// ------------------ 發布前排名/獎項預覽（本地試算，正式結果以計分引擎為準）------------------
+// 邏輯鏡射 scoring.py：淨桿升冪 → 差點少者優先 → manual_tie_order；
+// 規則參數（獎項、互斥、會期）全部取自已載入的 rules.yaml，不另行 hardcode。
+
+let histScores = null, histLoading = false;   // golf_scores.json 歷史（總桿冠年度限領順延用）
+function ensureHistScores() {
+  if (histScores || histLoading) return;
+  histLoading = true;
+  fetch(`golf_scores.json?v=${Date.now()}`, { cache: "no-store" })
+    .then(r => (r.ok ? r.json() : []))
+    .catch(() => [])
+    .then(rows => { histScores = rows; if (S.step === 5) render(); });
+}
+
+function priorGrossWinners() {
+  if (!histScores) return null;   // 尚未載入
+  const m = /(\d{4}-\d{2})\s*~\s*(\d{4}-\d{2})/.exec((rules.meta || {}).award_period || "");
+  if (!m) return new Set();
+  const winners = new Set();
+  for (const r of histScores) {
+    const month = String(r["賽事日期"] || "").slice(0, 7);
+    if (month >= m[1] && month <= m[2] && (r["所獲獎項"] || "").includes("總桿冠"))
+      winners.add(r["球員姓名"]);
+  }
+  return winners;
+}
+
+function previewRanking() {
+  const roster = Object.fromEntries((rules.players || []).map(p => [p.name, p.handicap]));
+  const members = S.players.filter(p => !p.is_guest && roster[p.name] != null
+                                        && p.scores.every(v => v != null));
+  const order = S.manualTieOrder;
+  const oidx = n => { const i = order.indexOf(n); return i < 0 ? order.length : i; };
+  const rows = members.map(p => {
+    const gross = p.scores.reduce((a, b) => a + b, 0);
+    return { name: p.name, gross, handicap: roster[p.name], net: gross - roster[p.name] };
+  });
+  rows.sort((a, b) => a.net - b.net || a.handicap - b.handicap || oidx(a.name) - oidx(b.name));
+  for (let i = 0; i < rows.length - 1; i++) {
+    const a = rows[i], b = rows[i + 1];
+    if (a.net === b.net && a.handicap === b.handicap &&
+        !(order.includes(a.name) && order.includes(b.name)))
+      return { blocked: [a.name, b.name] };
+  }
+  rows.forEach((r, i) => {
+    r.rank = i + 1;
+    const other = rows.find(o => o !== r && o.net === r.net);
+    if (other) {
+      r.tieNote = other.handicap === r.handicap ? "同分，順序依裁定"
+        : (r.handicap < other.handicap ? `與${other.name}同淨桿，差點少者在前` : "");
+    }
+  });
+  return { ranking: rows };
+}
+
+function previewAwards(ranking) {
+  const ORDER = ["近洞獎", "總桿冠", "淨桿冠", "幸運獎", "Eagle獎"];
+  const byName = {};
+  const add = (n, a) => { if (n && !(byName[n] || []).includes(a)) (byName[n] = byName[n] || []).push(a); };
+  const notes = [];
+
+  S.nearPin.forEach(n => add(n, "近洞獎"));
+
+  // 總桿冠軍：年度限領 → 會期歷史順延（cascade）
+  const gcCfg = (rules.awards || []).find(a => a.id === "gross_champion") || {};
+  const prior = priorGrossWinners();
+  const byGross = [...ranking].sort((a, b) => a.gross - b.gross || a.rank - b.rank);
+  if (prior === null) {
+    notes.push("⏳ 總桿冠軍：歷史成績載入中（年度限領順延需比對會期紀錄）…");
+  } else if (byGross.length) {
+    const gc = byGross.find(r => !(gcCfg.annual_limit_per_player && prior.has(r.name)));
+    if (gc) {
+      add(gc.name, "總桿冠");
+      if (gc.name !== byGross[0].name)
+        notes.push(`總桿最低為 ${byGross[0].name}（${byGross[0].gross}桿），本會期已領過總桿冠 → 順延 ${gc.name}`);
+    } else {
+      notes.push("總桿冠軍：所有會員本會期皆已領過，無人得獎");
+    }
+  }
+
+  add(ranking[0].name, "淨桿冠");
+
+  // 幸運分享獎：單雙判定 + 淨桿冠軍互斥（依 rules.yaml exclusivity）
+  const excl = ((rules.exclusivity || {}).net_and_lucky_share || "exclude") !== "both";
+  const basis = ranking[0].net;
+  const start = basis % 2 === 1 ? 1 : 2;
+  const luckyRanks = ranking.map(r => r.rank)
+    .filter(rk => rk % 2 === start % 2 && !(excl && rk === 1));
+  ranking.filter(r => luckyRanks.includes(r.rank)).forEach(r => add(r.name, "幸運獎"));
+  notes.push(`幸運獎：淨桿冠軍 ${basis} 為${basis % 2 ? "單" : "雙"}數 → 排名 ${luckyRanks.join("、")} 得獎`
+    + (excl && start === 1 ? "（排名1已得淨桿冠，不重複發放）" : ""));
+
+  // Eagle：逐洞 ≤ par−2
+  const names = new Set(ranking.map(r => r.name));
+  S.players.filter(p => names.has(p.name)).forEach(p => {
+    p.scores.forEach((s, i) => {
+      if (s != null && S.holePars[i] != null && s <= S.holePars[i] - 2) add(p.name, "Eagle獎");
+    });
+  });
+
+  const joined = {};
+  for (const n in byName) joined[n] = ORDER.filter(a => byName[n].includes(a)).join("、");
+  return { byName: joined, notes };
+}
+
 function buildConfirmedJSON() {
   return {
     date: S.date,
@@ -690,6 +795,7 @@ function buildConfirmedJSON() {
 }
 
 function renderStep5() {
+  ensureHistScores();   // 抓 golf_scores.json 供總桿冠年度限領預覽，載入後自動重繪
   // 進入發布前先跑同分預檢：未裁定的同分是阻斷性的
   const groups = tieGroups();
   // 清掉已不存在同分群組的舊裁定
@@ -721,6 +827,43 @@ function renderStep5() {
       </div>`).join("")}
     <button id="tieReset" class="text-xs text-gray-400">重新裁定</button>
   </div>` : "";
+
+  // 排名/獎項預覽：發布前即時試算，讓總幹事先確認同分排序與得獎名單
+  const pv = previewRanking();
+  let previewCard = "";
+  if (pv.blocked) {
+    previewCard = `
+    <div class="bg-white rounded-xl shadow p-4 border-l-4 border-accent">
+      <h2 class="font-bold text-primary">🏁 排名與獎項預覽</h2>
+      <p class="text-sm text-accent mt-2">⚠ ${pv.blocked.join("、")} 淨桿與差點皆相同，
+      請先在上方裁定卡點選順序，即可預覽完整排名與獎項。</p>
+    </div>`;
+  } else if (pv.ranking.length) {
+    const aw = previewAwards(pv.ranking);
+    previewCard = `
+    <div class="bg-white rounded-xl shadow overflow-hidden">
+      <div class="p-4 pb-2">
+        <h2 class="font-bold text-primary">🏁 排名與獎項預覽</h2>
+        <p class="text-xs text-gray-400 mt-1">依目前輸入即時試算，供發布前確認；正式結果以計分引擎為準。</p>
+      </div>
+      <table class="w-full text-sm">
+        <thead class="bg-gray-100 text-gray-600">
+          <tr><th class="p-2">名次</th><th class="p-2 text-left">球員</th><th class="p-2">總桿</th>
+          <th class="p-2">差點</th><th class="p-2">淨桿</th><th class="p-2 text-left">獎項</th></tr>
+        </thead>
+        <tbody>${pv.ranking.map(r => `
+          <tr class="border-t ${r.rank === 1 ? "bg-orange-50" : ""}">
+            <td class="p-2 text-center font-bold text-primary">${r.rank}</td>
+            <td class="p-2 font-semibold">${r.name}${r.tieNote ? `<div class="text-xs text-yellow-600 font-normal">${r.tieNote}</div>` : ""}</td>
+            <td class="p-2 text-center font-mono">${r.gross}</td>
+            <td class="p-2 text-center font-mono">${r.handicap}</td>
+            <td class="p-2 text-center font-mono font-bold">${r.net}</td>
+            <td class="p-2 text-sm text-accent">${aw.byName[r.name] || ""}</td>
+          </tr>`).join("")}</tbody>
+      </table>
+      ${aw.notes.length ? `<div class="px-4 py-3 text-xs text-gray-500 space-y-1">${aw.notes.map(n => `<div>· ${n}</div>`).join("")}</div>` : ""}
+    </div>`;
+  }
 
   const guests = S.players.filter(p => p.is_guest).length;
   app().innerHTML = `
@@ -754,12 +897,15 @@ function renderStep5() {
     </div>
   </div>
   ${tieCard}
+  ${previewCard}
   <div class="bg-white rounded-xl shadow p-4 space-y-3">
     <h2 class="font-bold text-primary">確認稿預覽 <span class="text-sm text-gray-400 font-normal">${path}</span></h2>
     <textarea id="jsonOut" readonly class="w-full h-40 border rounded-lg p-2 font-mono text-xs bg-gray-50">${JSON.stringify(data, null, 2)}</textarea>
     <div class="text-sm text-gray-500 leading-relaxed">
       發布流程：commit 確認稿 → 觸發計分 workflow → 引擎計算排名/獎項/差點
-      → 更新正式成績 → 成績頁自動部署。
+      → 更新正式成績 → 成績頁自動部署。<br>
+      <span class="text-accent">⚠ 發布會同時扣減前三名差點並寫回名冊。發布後才發現錯誤時，
+      請勿直接重新發布（差點會被重複扣減）——先請 Claude 還原上次發布，再修正重發。</span>
     </div>
     <div class="flex gap-2">
       <button id="dlBtn" class="flex-1 border border-primary text-primary rounded-xl py-3 font-bold">下載 JSON</button>
