@@ -73,12 +73,17 @@ def match_title(match_input, rules):
 
 
 def player_awards(result, match_input):
-    """彙整每人得獎清單 → {姓名: "獎A、獎B"}（依 AWARD_ORDER 固定順序）。"""
+    """彙整每人得獎清單 → {姓名: "獎A、獎B"}（依 AWARD_ORDER 固定順序）。
+
+    近洞獎與 Eagle 獎同一人可得多個（每個 par-3 洞各一位、一人多隻 Eagle
+    重複發放），得 2 個以上時記為「近洞獎×2」，獎品數量才不會在紀錄中遺失。
+    """
     got = {}
 
-    def add(name, award):
+    def add(name, award, times=1):
         if name:
-            got.setdefault(name, set()).add(award)
+            counts = got.setdefault(name, {})
+            counts[award] = counts.get(award, 0) + times
 
     awards = result.get("awards", {})
     near_pin = (match_input.get("manual_awards") or {}).get("near_pin")
@@ -91,9 +96,12 @@ def player_awards(result, match_input):
     for e in awards.get("eagle", {}).get("winners", []):
         add(e.get("name"), "Eagle獎")
 
+    def label(award, n):
+        return f"{award}×{n}" if n > 1 else award
+
     return {
-        name: "、".join(a for a in AWARD_ORDER if a in items)
-        for name, items in got.items()
+        name: "、".join(label(a, counts[a]) for a in AWARD_ORDER if a in counts)
+        for name, counts in got.items()
     }
 
 

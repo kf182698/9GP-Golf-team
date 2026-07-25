@@ -81,6 +81,7 @@ function newState() {
     courseId: "", courseName: "", coursePar: null,
     holePars: Array(18).fill(4),
     nineNames: ["前九", "後九"],
+    nineSel: [],               // 當場選定的兩個九洞區名稱（3 區以上球場如 A/B/C 由步驟①下拉選定）
     cardType: "iswing",
     provider: "anthropic",
     players: [],               // {name, is_guest, scores:[18], ocr:{validation,low:[],unread:[]}}
@@ -149,6 +150,20 @@ function renderStep1() {
   const opts = (rules.courses || []).map(c =>
     `<option value="${c.id}" ${S.courseId === c.id ? "selected" : ""}>${c.name}（par ${c.par_total}）</option>`).join("");
   const isCustom = S.courseId === "custom";
+  // 三個以上九洞區的球場（如 A/B/C 區）：當場選定實際下場的兩區
+  const selCourse = (rules.courses || []).find(c => c.id === S.courseId);
+  const zoneCard = (selCourse && (selCourse.nines || []).length > 2) ? `
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+      <label class="text-sm font-semibold text-blue-800">下場區域（本球場有 ${selCourse.nines.length} 個九洞區，請選本場實際打的兩區）</label>
+      <div class="grid grid-cols-2 gap-2">
+        ${[0, 1].map(i => `
+          <select data-zone="${i}" class="zoneSel border rounded-lg p-3 bg-white">
+            ${selCourse.nines.map(n =>
+              `<option value="${n.name}" ${S.nineSel[i] === n.name ? "selected" : ""}>${i === 0 ? "前" : "後"}半：${n.name}（par ${n.pars.reduce((a, b) => a + b, 0)}）</option>`).join("")}
+          </select>`).join("")}
+      </div>
+      ${S.nineSel[0] === S.nineSel[1] ? `<div class="text-xs text-accent font-semibold">⚠ 前後半選到同一區，請改選不同區</div>` : ""}
+    </div>` : "";
   app().innerHTML = `
   <div class="bg-white rounded-xl shadow p-4 space-y-4">
     <div>
@@ -162,6 +177,7 @@ function renderStep1() {
         <option value="custom" ${isCustom ? "selected" : ""}>其他球場（手動輸入）</option>
       </select>
     </div>
+    ${zoneCard}
     <div id="customArea" class="${isCustom ? "" : "hidden"} space-y-3">
       <input id="fCourseName" placeholder="球場名稱" value="${isCustom ? S.courseName : ""}"
              class="w-full border rounded-lg p-3">
@@ -196,10 +212,16 @@ function renderStep1() {
     </div>
     <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
   </div>
-  ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName))}`;
+  ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName)
+                 && !(zoneCard && S.nineSel[0] === S.nineSel[1]))}`;
 
   $("fDate").onchange = e => { S.date = e.target.value; save(); render(); };
   $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
+  document.querySelectorAll(".zoneSel").forEach(sel => sel.onchange = e => {
+    S.nineSel[+e.target.dataset.zone] = e.target.value;
+    if (S.nineSel[0] !== S.nineSel[1]) applyNines(selCourse);  // 同區時不套用，等使用者改正
+    save(); render();
+  });
   if (isCustom) {
     $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
     $("fCourseName").onchange = () => render();   // 失焦後重繪以更新下一步按鈕
@@ -376,15 +398,29 @@ function applyCourse(id) {
   S.courseId = id;
   if (id === "custom") {
     S.courseName = ""; S.holePars = Array(18).fill(4);
-    S.nineNames = ["前九", "後九"]; S.coursePar = 72;
+    S.nineNames = ["前九", "後九"]; S.nineSel = []; S.coursePar = 72;
     return;
   }
   const c = (rules.courses || []).find(c => c.id === id);
-  if (!c) { S.courseName = ""; return; }
+  if (!c) { S.courseName = ""; S.nineSel = []; return; }
   S.courseName = c.name;
-  S.nineNames = c.nines.map(n => n.name);
-  S.holePars = [...c.nines[0].pars, ...c.nines[1].pars];
-  S.coursePar = c.par_total;
+  // 預設組合：優先用 default_combination，否則取前兩區（三區以上球場可於步驟①改選）
+  const names = c.nines.map(n => n.name);
+  const def = (c.default_combination || []).filter(n => names.includes(n));
+  S.nineSel = def.length === 2 ? [...def] : names.slice(0, 2);
+  applyNines(c);
+}
+
+// 依 S.nineSel 選定的兩個九洞區，帶入每洞 par 與球場 par。
+// coursePar 一律由選定兩區加總，不直接用 c.par_total——三區以上球場的
+// par_total 只是預設組合的合計，換區後會不同。
+function applyNines(c) {
+  const pick = n => (c.nines || []).find(x => x.name === n);
+  const a = pick(S.nineSel[0]), b = pick(S.nineSel[1]);
+  if (!a || !b) return;
+  S.nineNames = [a.name, b.name];
+  S.holePars = [...a.pars, ...b.pars];
+  S.coursePar = S.holePars.reduce((x, y) => x + y, 0);
 }
 
 // ------------------ ② 出賽名單 ------------------
@@ -725,7 +761,11 @@ function previewAwards(ranking) {
   const add = (n, a) => { if (n && !(byName[n] || []).includes(a)) (byName[n] = byName[n] || []).push(a); };
   const notes = [];
 
-  S.nearPin.forEach(n => add(n, "近洞獎"));
+  // 近洞獎同一人可得多個 → 顯示為「近洞獎×2」（與 publish.py 的字串格式一致）
+  new Set(S.nearPin).forEach(n => {
+    const c = S.nearPin.filter(x => x === n).length;
+    add(n, c > 1 ? `近洞獎×${c}` : "近洞獎");
+  });
 
   // 總桿冠軍：年度限領 → 會期歷史順延（cascade）
   const gcCfg = (rules.awards || []).find(a => a.id === "gross_champion") || {};
@@ -764,8 +804,10 @@ function previewAwards(ranking) {
     });
   });
 
+  // 依 ORDER 排序；獎項名可能帶「×2」數量後綴，故以前綴比對而非完全相等
+  const rank = a => { const i = ORDER.findIndex(o => a.startsWith(o)); return i < 0 ? ORDER.length : i; };
   const joined = {};
-  for (const n in byName) joined[n] = ORDER.filter(a => byName[n].includes(a)).join("、");
+  for (const n in byName) joined[n] = [...byName[n]].sort((a, b) => rank(a) - rank(b)).join("、");
   return { byName: joined, notes };
 }
 
@@ -796,6 +838,8 @@ function buildConfirmedJSON() {
 
 function renderStep5() {
   ensureHistScores();   // 抓 golf_scores.json 供總桿冠年度限領預覽，載入後自動重繪
+  // 本場 par-3 洞號（1-based）：近洞獎每洞一位，用來提示與設上限
+  const par3Holes = S.holePars.map((p, i) => p === 3 ? i + 1 : null).filter(Boolean);
   // 進入發布前先跑同分預檢：未裁定的同分是阻斷性的
   const groups = tieGroups();
   // 清掉已不存在同分群組的舊裁定
@@ -890,10 +934,19 @@ function renderStep5() {
     <button id="summaryConfirm" class="w-full mt-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg py-2 font-semibold text-sm">確認無誤，繼續</button>
   </div>
   <div class="bg-white rounded-xl shadow p-4">
-    <h2 class="font-bold text-primary mb-2">🎯 近洞獎（現場人工判定，可複選）</h2>
-    <div class="flex gap-2 flex-wrap">${members.map(p => `
-      <button data-np="${p.name}" class="npBtn key px-4 py-2 rounded-full border font-semibold text-sm
-        ${S.nearPin.includes(p.name) ? "bg-accent text-white border-accent" : "bg-white text-gray-700"}">${p.name}</button>`).join("")}
+    <h2 class="font-bold text-primary mb-2">🎯 近洞獎（現場人工判定）</h2>
+    <p class="text-xs text-gray-500 mb-2">
+      本場有 <b>${par3Holes.length}</b> 個 par-3 洞（第 ${par3Holes.join("、")} 洞）。
+      點名字可累加，<b>同一人可得多個</b>；點「−」減一。目前已登 ${S.nearPin.length} 個。
+    </p>
+    <div class="flex gap-2 flex-wrap">${members.map(p => {
+      const cnt = S.nearPin.filter(x => x === p.name).length;
+      return `<span class="inline-flex items-center rounded-full border overflow-hidden ${cnt ? "border-accent" : "border-gray-300"}">
+        <button data-np="${p.name}" class="npBtn key px-4 py-2 font-semibold text-sm
+          ${cnt ? "bg-accent text-white" : "bg-white text-gray-700"}">${p.name}${cnt > 1 ? ` ×${cnt}` : ""}</button>
+        ${cnt ? `<button data-npm="${p.name}" class="npMinus key px-3 py-2 bg-accent/80 text-white font-bold text-sm border-l border-white/40">−</button>` : ""}
+      </span>`;
+    }).join("")}
     </div>
   </div>
   ${tieCard}
@@ -927,10 +980,19 @@ function renderStep5() {
     };
   }
 
+  // 近洞獎：點名字累加（同一人可多次），點「−」減一。
+  // 上限為本場 par-3 洞數——近洞獎本質是每個 par-3 洞各一位。
   document.querySelectorAll(".npBtn").forEach(b => b.onclick = () => {
-    const n = b.dataset.np;
-    S.nearPin = S.nearPin.includes(n) ? S.nearPin.filter(x => x !== n) : [...S.nearPin, n];
+    if (par3Holes.length && S.nearPin.length >= par3Holes.length) {
+      alert(`本場只有 ${par3Holes.length} 個 par-3 洞，近洞獎最多 ${par3Holes.length} 個。\n請先按「−」移除再改選。`);
+      return;
+    }
+    S.nearPin = [...S.nearPin, b.dataset.np];
     render();
+  });
+  document.querySelectorAll(".npMinus").forEach(b => b.onclick = () => {
+    const i = S.nearPin.lastIndexOf(b.dataset.npm);
+    if (i >= 0) { S.nearPin.splice(i, 1); render(); }
   });
   document.querySelectorAll(".tieBtn").forEach(b => b.onclick = () => {
     const n = b.dataset.tn;
