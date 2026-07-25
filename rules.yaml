@@ -162,6 +162,27 @@ courses:
     default_combination: ["前九", "後九"]
     par_total: 72
     source: "iSwing 成績卡 2026-05-22"
+  - id: "bali_gc"
+    name: "八里球場"
+    aliases: ["八里"]
+    nines:
+      # 成績卡僅標 OUT/IN 未標區域名稱，暫以前九/後九登錄，日後確認可補正
+      - { name: "前九", pars: [4,4,4,4,3,5,5,3,4], total: 36 }
+      - { name: "後九", pars: [4,4,3,5,4,4,3,4,5], total: 36 }
+    default_combination: ["前九", "後九"]
+    par_total: 72
+    source: "手寫成績卡 2026-07-25"
+  # 三個以上九洞區的球場（如 A/B/C 區）登錄範例：nines 列出所有區，
+  # default_combination 給常用組合，admin.html 步驟①會出現區域下拉供當場選擇。
+  # - id: "example_gc"
+  #   name: "範例球場"
+  #   aliases: ["範例"]
+  #   nines:
+  #     - { name: "A", pars: [4,4,3,5,4,4,3,4,5], total: 36 }
+  #     - { name: "B", pars: [4,3,5,4,4,4,5,4,3], total: 36 }
+  #     - { name: "C", pars: [5,4,3,4,4,5,3,4,4], total: 36 }
+  #   default_combination: ["A", "B"]
+  #   par_total: 72        # 預設組合的合計；實際以當場選定兩區加總為準
   # TODO: 補登其他常打球場（TGC 等）
 
 # ------------------ 來賓處理 ------------------
