@@ -193,12 +193,12 @@ validation:
 players:
   - { name: "曹勇良", handicap: 32 }
   - { name: "曾吟芳", handicap: 33 }
-  - { name: "林家進", handicap: 21 }
+  - { name: "林家進", handicap: 18 }
   - { name: "何崇華", handicap: 24 }
   - { name: "陳淂笙", handicap: 16 }
   - { name: "陳奕仲", handicap: 20 }
   - { name: "楊嘉一", handicap: 18 }
-  - { name: "陳彥宇", handicap: 33 }
+  - { name: "陳彥宇", handicap: 30 }
   - { name: "王建亞", handicap: 12 }
   - { name: "黃予安", handicap: 32 }
   - { name: "劉維智", handicap: 29 }
