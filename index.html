@@ -61,6 +61,25 @@
                 </table>
             </div>
         </div>
+
+        <!-- 逐洞完整明細：資料來自 golf_scores.json 的「逐洞」欄，選定球員後隱藏 -->
+        <div id="latestDetail" class="bg-white rounded-xl shadow overflow-hidden mt-4 hidden">
+            <div class="bg-primary text-white px-4 py-3 flex justify-between items-center cursor-pointer" id="detailToggle">
+                <h2 class="font-bold">📋 逐洞完整明細　<span id="detailSub" class="font-normal text-white/80 text-sm"></span></h2>
+                <span id="detailCaret" class="text-white/80 text-sm">▲</span>
+            </div>
+            <div id="detailBody">
+                <div id="detailPar" class="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-b"></div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-500">
+                            <tr id="detailHead"></tr>
+                        </thead>
+                        <tbody id="detailRows"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </section>
 
     <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden relative z-10">
@@ -195,6 +214,8 @@
                     text.textContent = player;
                     list.classList.add('hidden'); // 關閉選單
                     document.getElementById('mainContent').classList.remove('hidden');
+                    // 選定球員後收起逐洞明細（表格寬、與個人檢視無關），可點標題列展開
+                    document.getElementById('latestDetail').classList.add('hidden');
                     updateDashboard(player);
                 });
 
@@ -272,6 +293,72 @@
                     <td class="p-2 text-sm text-accent">${d['所獲獎項'] ?? ''}</td>
                 </tr>`).join('');
             document.getElementById('latestMatch').classList.remove('hidden');
+            renderLatestDetail(rows);
+        }
+
+        // 逐洞完整明細：只在該場成績列帶有「逐洞」欄時顯示（舊場次無此資料）
+        function renderLatestDetail(rows) {
+            const section = document.getElementById('latestDetail');
+            const played = rows.filter(d => Array.isArray(d['逐洞']) && d['逐洞'].length === 18);
+            if (!played.length) { section.classList.add('hidden'); return; }
+
+            const pars = played.find(d => Array.isArray(d['每洞標準桿']))?.['每洞標準桿'] || [];
+            const sum9 = (a, s) => a.slice(s, s + 9).reduce((x, y) => x + (y ?? 0), 0);
+            const parF = pars.length ? sum9(pars, 0) : null;
+            const parB = pars.length ? sum9(pars, 9) : null;
+
+            document.getElementById('detailSub').textContent =
+                `${played.length} 人${pars.length ? `　PAR ${parF + parB}` : ''}`;
+            document.getElementById('detailPar').innerHTML = pars.length
+                ? `Par｜前九：${pars.slice(0, 9).join(',')}（${parF}）　後九：${pars.slice(9).join(',')}（${parB}）`
+                : '';
+
+            // 表頭：H1–H9、前九、H10–H18、後九、總桿
+            const th = (t, cls = '') => `<th class="p-2 ${cls}">${t}</th>`;
+            document.getElementById('detailHead').innerHTML =
+                th('球員', 'text-left sticky left-0 bg-gray-50') +
+                pars.slice(0, 9).map((_, i) => th('H' + (i + 1))).join('') +
+                th('前九', 'bg-gray-100') +
+                pars.slice(9).map((_, i) => th('H' + (i + 10))).join('') +
+                th('後九', 'bg-gray-100') + th('總桿', 'bg-gray-100');
+
+            // 總桿低者在前（與明細表閱讀習慣一致）
+            const sorted = [...played].sort((a, b) => (a['總桿數'] ?? 999) - (b['總桿數'] ?? 999));
+            document.getElementById('detailRows').innerHTML = sorted.map((d, idx) => {
+                const h = d['逐洞'];
+                const cell = (v, i) => {
+                    const p = pars[i];
+                    // 相對 par 上色：老鷹以上/博蒂=綠、柏忌=灰、雙柏忌以上=紅
+                    let cls = 'text-gray-700';
+                    if (p != null && v != null) {
+                        const diff = v - p;
+                        if (diff <= -2) cls = 'text-green-700 font-bold';
+                        else if (diff === -1) cls = 'text-green-600 font-semibold';
+                        else if (diff === 1) cls = 'text-gray-500';
+                        else if (diff >= 2) cls = 'text-accent';
+                    }
+                    return `<td class="p-2 text-center font-mono ${cls}">${v ?? '—'}</td>`;
+                };
+                const bg = idx === 0 ? 'bg-orange-50' : '';
+                return `<tr class="border-t ${bg}">
+                    <td class="p-2 font-semibold whitespace-nowrap sticky left-0 ${bg || 'bg-white'}">${d['球員姓名']}</td>
+                    ${h.slice(0, 9).map((v, i) => cell(v, i)).join('')}
+                    <td class="p-2 text-center font-mono font-bold bg-gray-50">${sum9(h, 0)}</td>
+                    ${h.slice(9).map((v, i) => cell(v, i + 9)).join('')}
+                    <td class="p-2 text-center font-mono font-bold bg-gray-50">${sum9(h, 9)}</td>
+                    <td class="p-2 text-center font-mono font-bold bg-gray-50">${d['總桿數'] ?? '—'}</td>
+                </tr>`;
+            }).join('');
+
+            section.classList.remove('hidden');
+
+            // 標題列可收合表身（隱藏後仍能自行展開）
+            const toggle = document.getElementById('detailToggle');
+            toggle.onclick = () => {
+                const body = document.getElementById('detailBody');
+                const open = body.classList.toggle('hidden');
+                document.getElementById('detailCaret').textContent = open ? '▼' : '▲';
+            };
         }
 
         // 繪製走勢圖

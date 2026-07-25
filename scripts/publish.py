@@ -115,7 +115,18 @@ def build_match_rows(result, match_input, rules):
     awards_by_name = player_awards(result, match_input)
     roster = {p["name"]: p["handicap"] for p in rules.get("players", [])}
 
+    # 逐洞成績：index.html 只讀 golf_scores.json（唯一資料源），逐洞明細表
+    # 需要的資料必須一併寫入成績列，不另開檔案。出賽者寫 18 格與該場每洞 par，
+    # 請假者為 None。
+    hole_pars = match_input.get("hole_pars")
+    holes_by_name = {}
+    for p in match_input.get("players", []):
+        holes = list(p.get("front_9") or []) + list(p.get("back_9") or [])
+        if any(h is not None for h in holes):
+            holes_by_name[p["name"]] = holes
+
     def row(name, handicap, gross, net, rank):
+        holes = holes_by_name.get(name)
         return {
             "賽事日期": date,
             "例賽名稱": title,
@@ -125,6 +136,8 @@ def build_match_rows(result, match_input, rules):
             "淨桿數": net,
             "名次": rank,
             "所獲獎項": awards_by_name.get(name) or None,
+            "逐洞": holes,
+            "每洞標準桿": hole_pars if holes else None,
         }
 
     rows = []
