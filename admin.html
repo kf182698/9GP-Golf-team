@@ -962,9 +962,9 @@ function renderStep5() {
     </div>
     <div class="flex gap-2">
       <button id="dlBtn" class="flex-1 border border-primary text-primary rounded-xl py-3 font-bold">下載 JSON</button>
-      <button id="pubBtn" ${resolved ? "" : "disabled"}
-        class="flex-1 rounded-xl py-3 font-bold text-white ${resolved ? "bg-accent" : "bg-gray-300"}">
-        ${resolved ? (hasPat ? "🚀 一鍵發布" : "設定 PAT 後發布") : "同分待裁定"}</button>
+      <button id="pubBtn" ${resolved && !publishedOk ? "" : "disabled"}
+        class="flex-1 rounded-xl py-3 font-bold text-white ${resolved && !publishedOk ? "bg-accent" : publishedOk ? "bg-green-600" : "bg-gray-300"}">
+        ${publishedOk ? "✅ 已發布完成" : resolved ? (hasPat ? "🚀 一鍵發布" : "設定 PAT 後發布") : "同分待裁定"}</button>
     </div>
     <div id="pubLog" class="text-sm font-mono whitespace-pre-wrap"></div>
     <button id="resetBtn" class="w-full text-gray-400 text-sm py-2">🗑 清除本場草稿、重新開始</button>
@@ -1028,10 +1028,43 @@ async function ghFetch(url, opts = {}) {
   return res;
 }
 
+// 發布防呆：重複發布會讓淨桿前三名的差點「再扣一次」，且第二次是用已扣過的
+// 差點重算，排名與獎項會整批錯亂（2026-09-12 濱海即因連按兩次而發生）。
+// 四層防護：① 執行中旗標擋連點 ② 按鈕變成「發布中」並捲到紀錄區，讓人看得到有在動
+// ③ 成功後永久鎖住按鈕，不再解鎖 ④ 發布前比對 golf_scores.json，該日期已存在就攔截。
+let publishing = false;    // 非同步執行中
+let publishedOk = false;   // 本次已成功發布
+
 async function doPublish(data, path) {
+  const btn = $("pubBtn");
   const log = (m) => { $("pubLog").textContent += m + "\n"; };
+  if (publishing || publishedOk) return;   // ① 硬性擋連點（早於 disabled 生效）
+
+  // ④ 重複發布攔截：直接讀正式成績，該日期已有紀錄就要求二次確認。
+  //    這一層在重新整理頁面後仍然有效，是最後一道防線。
+  $("pubLog").textContent = "檢查該日期是否已發布…\n";
+  try {
+    const res = await fetch(`golf_scores.json?v=${Date.now()}`, { cache: "no-store" });
+    if (res.ok) {
+      const dup = (await res.json()).filter(r => r["賽事日期"] === S.date);
+      if (dup.length && !confirm(
+        `⚠ ${S.date} 已經發布過了（正式成績已有 ${dup.length} 列）。\n\n` +
+        `重複發布會讓淨桿前三名的差點「再扣一次」，而且第二次是用已經扣過的差點重算，` +
+        `排名與獎項會整批算錯。\n\n` +
+        `除非你已經請 Claude 還原上一次發布，否則請按「取消」。\n\n仍要繼續發布嗎？`)) {
+        log("已取消：此日期已有發布紀錄，未做任何變更。");
+        return;
+      }
+    }
+  } catch (_) { /* 讀不到正式成績就不擋，後續流程仍會照常驗證 */ }
+
+  publishing = true;
+  const origLabel = btn.textContent;
+  btn.disabled = true;                      // ② 明顯的執行中回饋
+  btn.textContent = "⏳ 發布中…請勿重複按";
+  btn.classList.remove("bg-accent"); btn.classList.add("bg-gray-500");
   $("pubLog").textContent = "";
-  $("pubBtn").disabled = true;
+  $("pubLog").scrollIntoView({ behavior: "smooth", block: "center" });
   try {
     // 同名檔已存在時需帶 sha 更新（重發布情境）
     let sha;
@@ -1079,11 +1112,18 @@ async function doPublish(data, path) {
     $("pubLog").insertAdjacentHTML("beforeend",
       `\n🎉 發布完成！計分結果請看：<a href="${runUrl}" target="_blank" rel="noopener" ` +
       `class="text-primary underline break-all">${runUrl}</a>\n`);
+    log("\n⚠ 本場已發布，請勿再按發布——重複發布會導致差點重複扣減。");
     localStorage.removeItem(DRAFT_KEY);   // 發布成功即清草稿
+    publishedOk = true;                   // ③ 成功後永久鎖住，finally 不再解鎖
+    btn.textContent = "✅ 已發布完成";
+    btn.classList.remove("bg-gray-500"); btn.classList.add("bg-green-600");
   } catch (e) {
     log(`\n❌ ${e.message}\n（確認稿未遺失，可重試或改用「下載 JSON」）`);
+    btn.textContent = origLabel;          // 失敗才復原標籤，允許重試
+    btn.classList.remove("bg-gray-500"); btn.classList.add("bg-accent");
   } finally {
-    $("pubBtn").disabled = false;
+    publishing = false;
+    btn.disabled = publishedOk;           // 成功→保持鎖住；失敗→解鎖可重試
   }
 }
 
