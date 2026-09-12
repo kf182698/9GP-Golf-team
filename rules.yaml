@@ -228,7 +228,7 @@ players:
   - { name: "林家進", handicap: 18 }
   - { name: "何崇華", handicap: 24 }
   - { name: "陳淂笙", handicap: 16 }
-  - { name: "陳奕仲", handicap: 20 }
+  - { name: "陳奕仲", handicap: 18 }
   - { name: "楊嘉一", handicap: 18 }
   - { name: "陳彥宇", handicap: 30 }
   - { name: "王建亞", handicap: 12 }
@@ -236,5 +236,5 @@ players:
   - { name: "劉維智", handicap: 29 }
   - { name: "陳翊彥", handicap: 14 }
   - { name: "賀錫敬", handicap: 19 }
-  - { name: "洪榮杰", handicap: 27 }
+  - { name: "洪榮杰", handicap: 25 }
   - { name: "劉韋廷", handicap: 28 }
