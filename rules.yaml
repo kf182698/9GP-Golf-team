@@ -172,6 +172,17 @@ courses:
     default_combination: ["前九", "後九"]
     par_total: 72
     source: "手寫成績卡 2026-07-25"
+  - id: "binhai_gc"
+    name: "濱海高爾夫球場"
+    aliases: ["濱海"]
+    nines:
+      # 成績卡僅標 OUT/IN 未標區域名稱，暫以前九/後九登錄，日後確認可補正
+      - { name: "前九", pars: [5,3,4,4,4,4,3,5,4], total: 36 }
+      - { name: "後九", pars: [4,3,5,4,3,4,4,5,4], total: 36 }
+    default_combination: ["前九", "後九"]
+    par_total: 72
+    # 碼數 藍 6855／白 6540／紅 5773；難度指數 前九 15,7,13,9,3,17,5,11,1、後九 16,18,8,12,14,4,10,6,2
+    source: "手寫成績卡 2026-09-12"
   # 三個以上九洞區的球場（如 A/B/C 區）登錄範例：nines 列出所有區，
   # default_combination 給常用組合，admin.html 步驟①會出現區域下拉供當場選擇。
   # - id: "example_gc"
