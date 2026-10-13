@@ -137,6 +137,34 @@ def test_gross_champion_cascades_from_history(sandbox):
     assert "總桿冠" in june["陳淂笙"]["所獲獎項"]
 
 
+def test_gross_champion_limit_resets_across_award_period(sandbox):
+    """會期換屆重新起算：舊會期已領過總桿冠者，進入新會期仍可再領。
+
+    與上一個測試同一份歷史紀錄（王建亞領過總桿冠），差別只在會期區間——
+    紀錄落在會期外就不該觸發 cascade 順延，證明限領一次是以 meta.award_period
+    為界，而非「這個人這輩子領過」。總幹事換屆時只改 award_period 即自動重置。
+    """
+    rules_path, scores_path, input_path = sandbox
+    # 沙盒會期改為只涵蓋 fixture 當場（2025-06），把歷史那場排到會期之前
+    text = rules_path.read_text(encoding="utf-8")
+    assert 'award_period: "2025-07 ~ 2026-09"' in text
+    rules_path.write_text(
+        text.replace('award_period: "2025-07 ~ 2026-09"',
+                     'award_period: "2025-06 ~ 2026-05"'),
+        encoding="utf-8")
+    scores_path.write_text(json.dumps([
+        {"賽事日期": "2025-03-15", "例賽名稱": "x", "球員姓名": "王建亞",
+         "差點": 12, "總桿數": 80, "淨桿數": 68, "名次": 1, "所獲獎項": "總桿冠"},
+    ], ensure_ascii=False), encoding="utf-8")
+
+    assert run_publish(rules_path, scores_path, input_path) == 0
+    rows = json.loads(scores_path.read_text(encoding="utf-8"))
+    june = {r["球員姓名"]: r for r in rows if r["賽事日期"] == "2025-06-21"}
+    # 新會期內尚未領過 → 總桿最低者照領，不順延
+    assert "總桿冠" in (june["王建亞"]["所獲獎項"] or "")
+    assert "總桿冠" not in (june["陳淂笙"]["所獲獎項"] or "")
+
+
 # ------------------ rules.yaml 差點寫回 ------------------
 
 def test_handicap_written_back_preserving_comments(sandbox):
