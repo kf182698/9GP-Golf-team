@@ -122,6 +122,7 @@ function newState() {
     cur: { p: 0, h: 0 },
     nearPin: [],               // 近洞獎得主（手動輸入，程式無法計算）
     manualTieOrder: [],        // 同分裁定順序（總幹事指定）
+    guestConfirmed: {},        // 名冊外姓名逐一確認為來賓 {姓名: true}（非新會員）
   };
 }
 
@@ -518,12 +519,30 @@ function applyNines(c) {
 
 // ------------------ ② 出賽名單 ------------------
 
+// 會期前兩個月（如 2026-10、2026-11）可能仍有新會員入隊；其餘月份名冊外姓名多為來賓
+function inEarlySeason(date) {
+  const m = /^(\d{4})-(\d{2})/.exec(rules.meta?.award_period || "");
+  if (!m || !date) return false;
+  const start = (+m[1]) * 12 + (+m[2] - 1);
+  const cur = (+date.slice(0, 4)) * 12 + (+date.slice(5, 7) - 1);
+  return cur - start >= 0 && cur - start < 2;
+}
+
 function renderStep2() {
   const roster = (rules.players || []).map(p => p.name);
   const uncertain = S.players.filter(p => p.ocr?.nameMatch === "uncertain").length;
+  S.guestConfirmed = S.guestConfirmed || {};
+  // 名冊外姓名一律要總幹事逐一確認「是來賓、不是新會員」才能往下
+  const guests = S.players.filter(p => p.is_guest);
+  const guestsOk = guests.every(p => p.name && S.guestConfirmed[p.name]);
+  const early = inEarlySeason(S.date);
   app().innerHTML = `
   <div class="bg-white rounded-xl shadow p-4 space-y-3">
     <h2 class="font-bold text-primary">出賽名單</h2>
+    ${guests.length ? `<div class="bg-orange-50 border border-orange-300 rounded p-3 text-sm text-orange-900 leading-relaxed">
+      本場有 ${guests.length} 位名冊外的姓名，請逐一確認是<b>來賓</b>（不列入排名、獎項與差點）。
+      ${early ? "目前是新會期前兩個月，可能是新入隊的會員——" : ""}若其實是新會員，請先把姓名與差點加入 rules.yaml 名冊後再登錄，不要以來賓發布。
+    </div>` : ""}
     ${uncertain > 0 ? `<div class="bg-yellow-50 border border-yellow-300 rounded p-3 text-sm text-yellow-800">⚠️ 有 ${uncertain} 列名字辨識不確定，請檢視黃邊框列並確認身份</div>` : ""}
     <div class="space-y-2 max-h-96 overflow-y-auto">
       ${S.players.map((p, i) => {
@@ -531,22 +550,24 @@ function renderStep2() {
         const isUnmatched = p.ocr?.nameMatch === "unmatched";
         const border = isUncertain || isUnmatched ? "border-yellow-400 border-2" : "";
         return `
-        <div class="flex gap-2 items-center p-2 rounded ${p.is_guest ? "bg-orange-50 opacity-75" : "bg-gray-50"} ${border}">
+        <div class="flex flex-wrap gap-2 items-center p-2 rounded ${p.is_guest ? "bg-orange-50 opacity-75" : "bg-gray-50"} ${border}">
           ${p.nameCandidates && p.nameCandidates.length > 0 ? `
-            <select data-i="${i}" class="candSel flex-1 border rounded p-2 text-sm">
+            <select data-i="${i}" class="candSel flex-1 min-w-0 border rounded p-2 text-sm">
               <option value="">選擇…</option>
               ${p.nameCandidates.map(c => {
                 return `<option value="${c.name}" data-guest="${!!c.isGuest}">${c.label || c.name}</option>`;
               }).join("")}
             </select>
           ` : `
-            <select data-i="${i}" class="psel flex-1 border rounded p-2 text-sm">
+            <select data-i="${i}" class="psel flex-1 min-w-[7rem] border rounded p-2 text-sm">
               <option value="">選擇會員…</option>
               ${roster.map(n => `<option value="${n}" ${p.name === n ? "selected" : ""}>${n}</option>`).join("")}
               <option value="__new_guest" ${p.is_guest ? "selected" : ""}>+ 新增來賓</option>
             </select>
           `}
-          ${p.is_guest ? `<input data-i="${i}" type="text" class="guestInput flex-1 border rounded p-2 text-sm" value="${p.name}" placeholder="來賓姓名">` : ""}
+          ${p.is_guest ? `<input data-i="${i}" type="text" class="guestInput flex-1 min-w-[6rem] border rounded p-2 text-sm" value="${p.name}" placeholder="來賓姓名">` : ""}
+          ${p.is_guest && p.name ? `<label class="flex items-center gap-1 text-xs whitespace-nowrap cursor-pointer text-orange-800 font-semibold">
+            <input type="checkbox" data-n="${p.name}" class="guestOk" ${S.guestConfirmed[p.name] ? "checked" : ""}>確認來賓</label>` : ""}
           <label class="flex items-center gap-1 text-xs whitespace-nowrap cursor-pointer">
             <input type="checkbox" data-i="${i}" class="guestToggle" ${p.is_guest ? "checked" : ""}>
             來賓
@@ -558,7 +579,12 @@ function renderStep2() {
     </div>
     <button id="addRow" class="w-full bg-primary text-white rounded-lg py-2 font-semibold text-sm">+ 加入球員</button>
   </div>
-  ${navBtns(true, S.players.length > 0, `開始輸入（${S.players.length} 人）`)}`;
+  ${navBtns(true, S.players.length > 0 && guestsOk, guestsOk ? `開始輸入（${S.players.length} 人）` : "請先確認來賓")}`;
+
+  document.querySelectorAll(".guestOk").forEach(chk => chk.onchange = e => {
+    S.guestConfirmed[e.target.dataset.n] = e.target.checked;
+    render();
+  });
 
   // 變更會員/來賓選擇（名字匹配候選）
   document.querySelectorAll(".candSel").forEach(sel => sel.onchange = e => {
@@ -596,6 +622,7 @@ function renderStep2() {
     S.players[i].name = e.target.value.trim();
     save();
   });
+  document.querySelectorAll(".guestInput").forEach(inp => inp.onchange = () => render());  // 失焦後出現確認勾選
 
   // 來賓開關
   document.querySelectorAll(".guestToggle").forEach(chk => chk.onchange = e => {
