@@ -121,7 +121,8 @@ def build_prompt(card_type, rules):
     courses = []
     for c in rules.get("courses", []):
         nines = "；".join(
-            f"{n['name']}: {','.join(map(str, n['pars']))}" for n in c.get("nines", [])
+            f"{n['name']}: {','.join(map(str, n['pars'])) if n.get('pars') else '待補（請從卡面辨識）'}"
+            for n in c.get("nines", [])
         )
         courses.append(f"- {c['name']}（par {c.get('par_total')}）：{nines}")
     courses_txt = "\n".join(courses) if courses else "（尚無登錄球場）"

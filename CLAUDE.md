@@ -207,6 +207,41 @@ Draft schema 如下：
 
 **系統開發完工**；僅剩實照片調校（見「待補資料」）。
 
+## 階段 4 第十三回合實作決定（2026-11-07：字體大小、快報差點欄、球場分區每場確認）
+
+- **球場一律以「九洞區」登錄，不登錄固定 18 洞**（總幹事裁定）：新豐有西／東／中三區，
+  2026-11-07 只打西＋東，下次組合不一定相同。rules.yaml 新豐補登「中」區為
+  `pars: null, total: null`（待補）；`par_total` 註明僅為預設組合合計。
+- **admin.html 步驟①：每個已登錄球場都顯示分區卡**（原本只有 3 區以上才顯示）——
+  前／後半各一個下拉、顯示本場 18 洞 par 供對照成績卡，並要求勾選
+  「我已對照成績卡，確認本場下場區域與每洞標準桿正確」才能下一步。
+  `S.zoneConfirmed` 在換球場、換區、改日期、改待補 par 時一律重設為 false——
+  **每場重新確認，不沿用上一場**。草稿（iSwing 卡印有區名）若帶有本球場區名會預選，
+  但仍須總幹事勾選。
+- **待補區現場輸入**：選到 `pars: null` 的區時出現 9 格輸入（3～6），填滿才可下一步；
+  值存 `S.pendingPars`，`applyNines()` 以之組 `holePars`，未填格為 null、`coursePar` 為 null。
+- **待補區發布時自動補登**：`publish.py::pending_nine_pars()` 找出本場下場且 rules.yaml
+  仍為 null 的區，`fill_nine_pars_in_rules()` 在**該球場區塊內**逐行正則把
+  `pars: null, total: null` 換成實際值（保留註解，找不到唯一行即中止）。
+  **只補 null，絕不覆寫已登錄的區**——已登錄 par 有誤須總幹事人工改 rules.yaml。
+  發布摘要多一段「球場分區補登」。
+- **golf_scores.json 新增「下場區域」欄**（如 `"西／東"`，向後相容）：出賽者列寫入，
+  請假者 null，來源為確認稿 `front_nine_name`／`back_nine_name`。2026-11-07 已回填。
+  index.html 逐洞明細的標題、Par 說明列與小計欄頭改用實際區名（無此欄的舊場次
+  退回「前九／後九」）。
+- **字體大小按鈕**（index.html、admin.html 頁首）：小 100%／中 115%（預設）／大 130%／
+  特大 150%，調整 `<html>` 根字級，Tailwind rem 單位整頁等比縮放；選擇存
+  localStorage `gp9_font`（try/catch，隱私模式退回預設）。Chart.js 字級是 px，
+  切換時以 `onFontChange()` 重繪走勢圖並依比例設 `Chart.defaults.font.size`。
+  特大字級下表頭、球員欄加 `whitespace-nowrap`，表格在 `overflow-x-auto` 內橫捲，
+  整頁寬度不超出手機（390px 實測無橫向捲動）。
+- **最新例賽快報新增「差點」欄**，位於總桿與淨桿之間（顯示本場計算用的調整前差點，
+  與「總桿−差點=淨桿」對得上；來賓為 —）。
+- **測試**：新增 `tests/test_course_zones.py`（7 項）：新豐三區且中區待補、所有區格式、
+  成績列記錄下場區域、已登錄區不補登、首次打中區發布後補登且保留註解、par 不完整拒絕、
+  球場不存在中止。全套 62 項通過。瀏覽器實測（Playwright，390px 行動 viewport）：
+  未勾確認時下一步停用、換區後確認自動取消、中區 9 格填完後 holePars／coursePar 正確。
+
 ## 階段 4 第十二回合實作決定（2026-10-13：2026 新年度章程生效）
 
 - **新會期自 2026-10-24 首場例賽起**（`rules.yaml` v1.1 → v1.2）：
@@ -589,7 +624,8 @@ admin.html 需提供裁定介面（顯示雙方差點供判斷，總幹事指定
 
 ## 待補資料
 
-- [ ] 補登其他常打球場的每洞 par（rules.yaml courses 區塊）
+- [ ] 補登其他常打球場的每洞 par（rules.yaml courses 區塊，以九洞區為單位）
+- [ ] 新豐「中」區 par 待補：第一次打中區時於 admin 步驟①輸入，發布即自動補登
 - [ ] repo Settings → Secrets 加入 `ANTHROPIC_API_KEY`（/scorecard 命令需要）
 - [ ] 確認 GitHub Pages 設定為 main branch 部署（score.yml push 後自動更新網頁）
 - [ ] **實照片調校**：拿實際 iSwing / 手寫成績卡跑 `/scorecard` 命令，調 prompt 至

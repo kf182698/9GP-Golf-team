@@ -18,8 +18,39 @@ tailwind.config = { theme: { extend: { colors: {
 <style>
   body { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
   .key { user-select: none; }
+  /* 窄格數字輸入：隱藏上下箭頭，讓 9 格一列放得下 */
+  .pzIn::-webkit-inner-spin-button, .pzIn::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .pzIn { -moz-appearance: textfield; appearance: textfield; }
   .key:active { transform: scale(0.94); filter: brightness(0.92); }
 </style>
+    <script>
+        // 字體大小：Tailwind 以 rem 為單位，調整根字級即可整頁等比放大。
+        // 選擇記在本機瀏覽器（localStorage），隱私模式讀不到時退回預設「中」。
+        const FONT_LEVELS = [{ k: 'S', label: '小', pct: 100 }, { k: 'M', label: '中', pct: 115 },
+                             { k: 'L', label: '大', pct: 130 }, { k: 'XL', label: '特大', pct: 150 }];
+        const FONT_KEY = 'gp9_font';
+        let fontK = 'M';
+        try { fontK = localStorage.getItem(FONT_KEY) || 'M'; } catch (_) {}
+        function getFontLevel() { return FONT_LEVELS.find(l => l.k === fontK) || FONT_LEVELS[1]; }
+        document.documentElement.style.fontSize = getFontLevel().pct + '%';
+        function setFontLevel(k) {
+            fontK = k;
+            try { localStorage.setItem(FONT_KEY, k); } catch (_) {}
+            document.documentElement.style.fontSize = getFontLevel().pct + '%';
+            renderFontButtons();
+            if (typeof onFontChange === 'function') onFontChange();
+        }
+        function renderFontButtons() {
+            const box = document.getElementById('fontBtns');
+            if (!box) return;
+            const cur = getFontLevel().k;
+            box.innerHTML = '<span class="text-xs text-white/70 mr-1 whitespace-nowrap">字體</span>' + FONT_LEVELS.map(l =>
+                `<button type="button" onclick="setFontLevel('${l.k}')" aria-pressed="${l.k === cur}"
+                    class="whitespace-nowrap px-2 py-1 rounded text-sm font-semibold ${l.k === cur
+                        ? 'bg-white text-primary' : 'bg-white/15 text-white'}">${l.label}</button>`).join('');
+        }
+        document.addEventListener('DOMContentLoaded', renderFontButtons);
+    </script>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800 pb-28">
 
@@ -34,6 +65,7 @@ tailwind.config = { theme: { extend: { colors: {
     </div>
     <button id="patBtn" class="text-xl px-2" title="GitHub 設定">⚙️</button>
   </div>
+  <div id="fontBtns" class="max-w-xl mx-auto mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="字體大小"></div>
   <div class="max-w-xl mx-auto mt-2 flex gap-1" id="stepDots"></div>
 </header>
 
@@ -81,7 +113,9 @@ function newState() {
     courseId: "", courseName: "", coursePar: null,
     holePars: Array(18).fill(4),
     nineNames: ["前九", "後九"],
-    nineSel: [],               // 當場選定的兩個九洞區名稱（3 區以上球場如 A/B/C 由步驟①下拉選定）
+    nineSel: [],               // 當場選定的兩個九洞區名稱（每場都要在步驟①選定並確認）
+    zoneConfirmed: false,      // 總幹事已核對本場下場區域與每洞 par（每場重新確認，不沿用）
+    pendingPars: {},           // 尚未登錄 par 的九洞區（rules.yaml pars: null）現場輸入值 {區名: [9]}
     cardType: "iswing",
     provider: "anthropic",
     players: [],               // {name, is_guest, scores:[18], ocr:{validation,low:[],unread:[]}}
@@ -150,20 +184,50 @@ function renderStep1() {
   const opts = (rules.courses || []).map(c =>
     `<option value="${c.id}" ${S.courseId === c.id ? "selected" : ""}>${c.name}（par ${c.par_total}）</option>`).join("");
   const isCustom = S.courseId === "custom";
-  // 三個以上九洞區的球場（如 A/B/C 區）：當場選定實際下場的兩區
+  // 下場區域：每個球場都以「九洞區」登錄，每場都必須選定實際打的兩區並勾選確認，
+  // 不能把上次的 18 洞直接沿用（例：新豐有西/東/中三區，每次打的組合不一定）。
   const selCourse = (rules.courses || []).find(c => c.id === S.courseId);
-  const zoneCard = (selCourse && (selCourse.nines || []).length > 2) ? `
-    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-      <label class="text-sm font-semibold text-blue-800">下場區域（本球場有 ${selCourse.nines.length} 個九洞區，請選本場實際打的兩區）</label>
-      <div class="grid grid-cols-2 gap-2">
+  const zoneSum = n => Array.isArray(n.pars) ? `par ${n.pars.reduce((a, b) => a + b, 0)}` : "par 待補";
+  const sameZone = selCourse && S.nineSel[0] === S.nineSel[1];
+  const pendingZones = selCourse ? S.nineSel.filter(z => {
+    const n = (selCourse.nines || []).find(x => x.name === z);
+    return n && !Array.isArray(n.pars);
+  }) : [];
+  const zoneCard = selCourse ? `
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-3">
+      <label class="text-sm font-semibold text-blue-800">下場區域（本球場共 ${selCourse.nines.length} 區：${selCourse.nines.map(n => n.name).join("、")}）</label>
+      <div class="grid grid-cols-1 gap-2">
         ${[0, 1].map(i => `
-          <select data-zone="${i}" class="zoneSel border rounded-lg p-3 bg-white">
+          <select data-zone="${i}" class="zoneSel w-full border rounded-lg p-3 bg-white">
             ${selCourse.nines.map(n =>
-              `<option value="${n.name}" ${S.nineSel[i] === n.name ? "selected" : ""}>${i === 0 ? "前" : "後"}半：${n.name}（par ${n.pars.reduce((a, b) => a + b, 0)}）</option>`).join("")}
+              `<option value="${n.name}" ${S.nineSel[i] === n.name ? "selected" : ""}>${i === 0 ? "前" : "後"}半：${n.name}（${zoneSum(n)}）</option>`).join("")}
           </select>`).join("")}
       </div>
-      ${S.nineSel[0] === S.nineSel[1] ? `<div class="text-xs text-accent font-semibold">⚠ 前後半選到同一區，請改選不同區</div>` : ""}
+      ${sameZone ? `<div class="text-xs text-accent font-semibold">⚠ 前後半選到同一區，請改選不同區</div>` : ""}
+      ${pendingZones.map(z => {
+        const v = S.pendingPars[z] || Array(9).fill(null);
+        const ok = v.every(x => Number.isInteger(x) && x >= 3 && x <= 6);
+        return `
+        <div class="bg-white border border-amber-300 rounded-lg p-3 space-y-2">
+          <div class="text-sm font-semibold text-amber-800">「${z}」區尚未登錄每洞標準桿，請照成績卡輸入 9 洞 par（發布時自動補登）</div>
+          <div class="grid grid-cols-9 gap-1">${v.map((x, i) =>
+            `<input type="number" inputmode="numeric" min="3" max="6" value="${x ?? ""}" data-pz="${z}" data-pi="${i}"
+               class="pzIn w-full min-w-0 border rounded py-2 px-0 text-center font-mono">`).join("")}</div>
+          <div class="text-xs ${ok ? "text-green-700" : "text-accent"}">${ok ? `合計 par ${v.reduce((a, b) => a + b, 0)}` : "每洞需填 3～6"}</div>
+        </div>`;
+      }).join("")}
+      ${!sameZone ? `
+      <div class="text-xs text-gray-600 font-mono leading-relaxed bg-white rounded p-2">
+        ${S.nineNames[0]}：${S.holePars.slice(0, 9).map(p => p ?? "?").join(",")}<br>
+        ${S.nineNames[1]}：${S.holePars.slice(9).map(p => p ?? "?").join(",")}　合計 par ${S.holePars.every(Number.isInteger) ? S.holePars.reduce((a, b) => a + b, 0) : "?"}
+      </div>
+      <label class="flex items-start gap-2 text-sm font-semibold text-blue-900">
+        <input type="checkbox" id="zoneOk" class="mt-1 w-5 h-5" ${S.zoneConfirmed ? "checked" : ""}>
+        <span>我已對照成績卡，確認本場下場區域與上列每洞標準桿正確</span>
+      </label>` : ""}
     </div>` : "";
+  const pendingOk = pendingZones.every(z =>
+    (S.pendingPars[z] || []).length === 9 && S.pendingPars[z].every(x => Number.isInteger(x) && x >= 3 && x <= 6));
   app().innerHTML = `
   <div class="bg-white rounded-xl shadow p-4 space-y-4">
     <div>
@@ -213,15 +277,24 @@ function renderStep1() {
     <div id="ocrLog" class="text-xs font-mono whitespace-pre-wrap text-gray-600"></div>
   </div>
   ${navBtns(false, !!S.courseId && (S.courseId !== "custom" || S.courseName)
-                 && !(zoneCard && S.nineSel[0] === S.nineSel[1]))}`;
+                 && !(selCourse && (sameZone || !pendingOk || !S.zoneConfirmed)))}`;
 
-  $("fDate").onchange = e => { S.date = e.target.value; save(); render(); };
+  $("fDate").onchange = e => { S.date = e.target.value; S.zoneConfirmed = false; save(); render(); };
   $("fCourse").onchange = e => { applyCourse(e.target.value); render(); };
   document.querySelectorAll(".zoneSel").forEach(sel => sel.onchange = e => {
     S.nineSel[+e.target.dataset.zone] = e.target.value;
+    S.zoneConfirmed = false;                                   // 換區必須重新確認
     if (S.nineSel[0] !== S.nineSel[1]) applyNines(selCourse);  // 同區時不套用，等使用者改正
     save(); render();
   });
+  document.querySelectorAll(".pzIn").forEach(inp => inp.onchange = e => {
+    const z = e.target.dataset.pz, i = +e.target.dataset.pi, v = parseInt(e.target.value, 10);
+    S.pendingPars[z] = S.pendingPars[z] || Array(9).fill(null);
+    S.pendingPars[z][i] = Number.isInteger(v) ? v : null;
+    S.zoneConfirmed = false;
+    applyNines(selCourse); save(); render();
+  });
+  if ($("zoneOk")) $("zoneOk").onchange = e => { S.zoneConfirmed = e.target.checked; save(); render(); };
   if (isCustom) {
     $("fCourseName").oninput = e => { S.courseName = e.target.value.trim(); S.coursePar = S.holePars.reduce((a, b) => a + b, 0); save(); };
     $("fCourseName").onchange = () => render();   // 失焦後重繪以更新下一步按鈕
@@ -345,7 +418,22 @@ function applyDraft(draft) {
   // 球場：比對 courses 名稱；比對不到 → 自訂（帶草稿的 hole_pars）
   const c = (rules.courses || []).find(c =>
     c.name === draft.course || (c.aliases || []).includes(draft.course));
-  if (c) { applyCourse(c.id); }
+  if (c) {
+    applyCourse(c.id);
+    // 草稿辨識到的區名（如 iSwing 卡的「西／東」）若是本球場的區，預選之；仍須總幹事勾選確認
+    const zones = (c.nines || []).map(n => n.name);
+    const fz = draft.front_nine_name, bz = draft.back_nine_name;
+    if (zones.includes(fz) && zones.includes(bz) && fz !== bz) {
+      S.nineSel = [fz, bz];
+      (c.nines || []).forEach((n, _) => {
+        if (!Array.isArray(n.pars) && Array.isArray(draft.hole_pars) && draft.hole_pars.length === 18) {
+          if (n.name === fz) S.pendingPars[fz] = draft.hole_pars.slice(0, 9);
+          if (n.name === bz) S.pendingPars[bz] = draft.hole_pars.slice(9);
+        }
+      });
+      applyNines(c);
+    }
+  }
   else {
     S.courseId = "custom";
     S.courseName = draft.course || "";
@@ -402,6 +490,7 @@ function applyCourse(id) {
     return;
   }
   const c = (rules.courses || []).find(c => c.id === id);
+  S.zoneConfirmed = false; S.pendingPars = {};
   if (!c) { S.courseName = ""; S.nineSel = []; return; }
   S.courseName = c.name;
   // 預設組合：優先用 default_combination，否則取前兩區（三區以上球場可於步驟①改選）
@@ -418,9 +507,13 @@ function applyNines(c) {
   const pick = n => (c.nines || []).find(x => x.name === n);
   const a = pick(S.nineSel[0]), b = pick(S.nineSel[1]);
   if (!a || !b) return;
+  S.pendingPars = S.pendingPars || {};
+  // 待補區（pars: null）改用現場輸入值；尚未填的格以 null 佔位，步驟①會擋下一步
+  const parsOf = n => Array.isArray(n.pars) ? n.pars
+    : (S.pendingPars[n.name] || Array(9).fill(null));
   S.nineNames = [a.name, b.name];
-  S.holePars = [...a.pars, ...b.pars];
-  S.coursePar = S.holePars.reduce((x, y) => x + y, 0);
+  S.holePars = [...parsOf(a), ...parsOf(b)];
+  S.coursePar = S.holePars.every(Number.isInteger) ? S.holePars.reduce((x, y) => x + y, 0) : null;
 }
 
 // ------------------ ② 出賽名單 ------------------

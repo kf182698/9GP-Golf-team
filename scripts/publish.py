@@ -125,6 +125,13 @@ def build_match_rows(result, match_input, rules):
         if any(h is not None for h in holes):
             holes_by_name[p["name"]] = holes
 
+    # 下場區域：同一球場可能有三區以上（如新豐 西/東/中），每場實際打哪兩區不固定，
+    # 必須隨成績記錄下來，事後才查得到該場 18 洞 par 的來歷。
+    nines_played = None
+    fn, bn = match_input.get("front_nine_name"), match_input.get("back_nine_name")
+    if fn and bn:
+        nines_played = f"{fn}／{bn}"
+
     def row(name, handicap, gross, net, rank):
         holes = holes_by_name.get(name)
         return {
@@ -138,6 +145,7 @@ def build_match_rows(result, match_input, rules):
             "所獲獎項": awards_by_name.get(name) or None,
             "逐洞": holes,
             "每洞標準桿": hole_pars if holes else None,
+            "下場區域": nines_played if holes else None,
         }
 
     rows = []
@@ -197,6 +205,66 @@ def apply_handicap_to_rules(rules_path, adjustments):
     return changed
 
 
+# ------------------ rules.yaml 未登錄九洞區 par 補登 ------------------
+
+def pending_nine_pars(match_input, rules):
+    """找出本場下場、但 rules.yaml 中 pars 仍為 null（待補）的九洞區。
+
+    回傳 [(球場名稱, 區名, 9 洞 par)]。只補「待補」的區，已登錄的區即使
+    確認稿的 par 不同也不覆寫——已登錄值的修正必須由總幹事人工改 rules.yaml。
+    """
+    course = match_input.get("course", "")
+    pars = match_input.get("hole_pars") or []
+    if len(pars) != 18:
+        return []
+    c = next((c for c in rules.get("courses", [])
+              if course in [c.get("name")] + list(c.get("aliases", []))), None)
+    if not c:
+        return []
+    out = []
+    for name, seg in ((match_input.get("front_nine_name"), pars[:9]),
+                      (match_input.get("back_nine_name"), pars[9:])):
+        nine = next((n for n in c.get("nines", []) if n.get("name") == name), None)
+        if nine is not None and nine.get("pars") is None:
+            if any(not isinstance(p, int) for p in seg):
+                raise RuntimeError(f"{c['name']}「{name}」區 par 不完整，無法補登：{seg}")
+            out.append((c["name"], name, list(seg)))
+    return out
+
+
+def fill_nine_pars_in_rules(rules_path, fills):
+    """把待補區的 `pars: null, total: null` 逐行替換為實際值，保留檔內註解。
+
+    只在該球場區塊內（`name: "<球場>"` 到下一個 `- id:` 之間）找唯一一行，
+    找不到或不唯一即中止，避免誤改其他球場同名的區。
+    """
+    if not fills:
+        return []
+    with open(rules_path, encoding="utf-8") as f:
+        text = f.read()
+    for course, zone, pars in fills:
+        start = text.find(f'name: "{course}"')
+        if start < 0:
+            raise RuntimeError(f"rules.yaml 找不到球場「{course}」，補登中止")
+        nxt = text.find("\n  - id:", start)
+        end = nxt if nxt >= 0 else len(text)
+        block = text[start:end]
+        pattern = re.compile(
+            r'^(\s*-\s*\{\s*name:\s*"' + re.escape(zone)
+            + r'"\s*,\s*)pars:\s*null\s*,\s*total:\s*null(\s*\})',
+            re.MULTILINE,
+        )
+        new_block, n = pattern.subn(
+            lambda m: f"{m.group(1)}pars: [{','.join(map(str, pars))}], total: {sum(pars)}{m.group(2)}",
+            block)
+        if n != 1:
+            raise RuntimeError(f"rules.yaml「{course}」找不到唯一的待補「{zone}」區行（匹配 {n} 次），補登中止")
+        text = text[:start] + new_block + text[end:]
+    with open(rules_path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return fills
+
+
 # ------------------ 主流程 ------------------
 
 def publish(rules_path, input_path, scores_path, dry_run=False):
@@ -232,6 +300,11 @@ def publish(rules_path, input_path, scores_path, dry_run=False):
                      + (f"　🏆 {award}" if award else ""))
     if result.get("excluded_guests"):
         lines.append(f"\n來賓（不列入排名）：{'、'.join(result['excluded_guests'])}")
+    fills = pending_nine_pars(match_input, rules)
+    if fills:
+        lines.append("\n### 球場分區補登")
+        for course, zone, pars in fills:
+            lines.append(f"- {course}「{zone}」區首次下場，par 補登為 {','.join(map(str, pars))}（{sum(pars)}）")
     lines.append("\n### 差點調整")
     for adj in adjustments:
         lines.append(f"- {adj['name']}：{adj['before']} → {adj['after']}"
@@ -245,6 +318,7 @@ def publish(rules_path, input_path, scores_path, dry_run=False):
         json.dump(merged, f, ensure_ascii=False, indent=2)
         f.write("\n")
     apply_handicap_to_rules(rules_path, adjustments)
+    fill_nine_pars_in_rules(rules_path, fills)
     return 0, "\n".join(lines)
 
 

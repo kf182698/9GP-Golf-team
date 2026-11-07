@@ -18,6 +18,34 @@
             }
         }
     </script>
+    <script>
+        // 字體大小：Tailwind 以 rem 為單位，調整根字級即可整頁等比放大。
+        // 選擇記在本機瀏覽器（localStorage），隱私模式讀不到時退回預設「中」。
+        const FONT_LEVELS = [{ k: 'S', label: '小', pct: 100 }, { k: 'M', label: '中', pct: 115 },
+                             { k: 'L', label: '大', pct: 130 }, { k: 'XL', label: '特大', pct: 150 }];
+        const FONT_KEY = 'gp9_font';
+        let fontK = 'M';
+        try { fontK = localStorage.getItem(FONT_KEY) || 'M'; } catch (_) {}
+        function getFontLevel() { return FONT_LEVELS.find(l => l.k === fontK) || FONT_LEVELS[1]; }
+        document.documentElement.style.fontSize = getFontLevel().pct + '%';
+        function setFontLevel(k) {
+            fontK = k;
+            try { localStorage.setItem(FONT_KEY, k); } catch (_) {}
+            document.documentElement.style.fontSize = getFontLevel().pct + '%';
+            renderFontButtons();
+            if (typeof onFontChange === 'function') onFontChange();
+        }
+        function renderFontButtons() {
+            const box = document.getElementById('fontBtns');
+            if (!box) return;
+            const cur = getFontLevel().k;
+            box.innerHTML = '<span class="text-xs text-white/70 mr-1 whitespace-nowrap">字體</span>' + FONT_LEVELS.map(l =>
+                `<button type="button" onclick="setFontLevel('${l.k}')" aria-pressed="${l.k === cur}"
+                    class="whitespace-nowrap px-2 py-1 rounded text-sm font-semibold ${l.k === cur
+                        ? 'bg-white text-primary' : 'bg-white/15 text-white'}">${l.label}</button>`).join('');
+        }
+        document.addEventListener('DOMContentLoaded', renderFontButtons);
+    </script>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800 pb-12">
 
@@ -28,6 +56,7 @@
                 <div>
                     <h1 class="text-2xl font-bold tracking-wider">9GP球隊 成績查詢系統</h1>
                     <div class="mt-1 text-sm text-white/80">成績更新日期：<span id="lastUpdatedDate">-</span></div>
+                    <div id="fontBtns" class="mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="字體大小"></div>
                 </div>
             </div>
             
@@ -53,9 +82,9 @@
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
-                    <thead class="bg-gray-50 text-gray-500">
+                    <thead class="bg-gray-50 text-gray-500 whitespace-nowrap">
                         <tr><th class="p-2">名次</th><th class="p-2 text-left">球員</th>
-                        <th class="p-2">總桿</th><th class="p-2">淨桿</th><th class="p-2 text-left">獎項</th></tr>
+                        <th class="p-2">總桿</th><th class="p-2">差點</th><th class="p-2">淨桿</th><th class="p-2 text-left">獎項</th></tr>
                     </thead>
                     <tbody id="latestRows"></tbody>
                 </table>
@@ -287,8 +316,9 @@
             document.getElementById('latestRows').innerHTML = rows.map(d => `
                 <tr class="border-t ${d['名次'] === 1 ? 'bg-orange-50' : ''}">
                     <td class="p-2 text-center font-bold ${typeof d['名次'] === 'number' ? 'text-primary' : 'text-gray-400 text-xs'}">${d['名次']}</td>
-                    <td class="p-2 font-semibold">${d['球員姓名']}</td>
+                    <td class="p-2 font-semibold whitespace-nowrap">${d['球員姓名']}</td>
                     <td class="p-2 text-center font-mono">${d['總桿數'] ?? '—'}</td>
+                    <td class="p-2 text-center font-mono text-gray-500">${d['差點'] ?? '—'}</td>
                     <td class="p-2 text-center font-mono">${d['淨桿數'] ?? '—'}</td>
                     <td class="p-2 text-sm text-accent">${d['所獲獎項'] ?? ''}</td>
                 </tr>`).join('');
@@ -307,10 +337,13 @@
             const parF = pars.length ? sum9(pars, 0) : null;
             const parB = pars.length ? sum9(pars, 9) : null;
 
+            // 下場區域（如「西／東」）：三區球場每場組合不同，有記錄就顯示實際區名
+            const zones = (played.find(d => d['下場區域'])?.['下場區域'] || '').split('／');
+            const [zF, zB] = zones.length === 2 ? zones : ['前九', '後九'];
             document.getElementById('detailSub').textContent =
-                `${played.length} 人${pars.length ? `　PAR ${parF + parB}` : ''}`;
+                `${played.length} 人${zones.length === 2 ? `　${zF}＋${zB}區` : ''}${pars.length ? `　PAR ${parF + parB}` : ''}`;
             document.getElementById('detailPar').innerHTML = pars.length
-                ? `Par｜前九：${pars.slice(0, 9).join(',')}（${parF}）　後九：${pars.slice(9).join(',')}（${parB}）`
+                ? `Par｜${zF}：${pars.slice(0, 9).join(',')}（${parF}）　${zB}：${pars.slice(9).join(',')}（${parB}）`
                 : '';
 
             // 表頭：H1–H9、前九、H10–H18、後九、總桿
@@ -318,9 +351,9 @@
             document.getElementById('detailHead').innerHTML =
                 th('球員', 'text-left sticky left-0 bg-gray-50') +
                 pars.slice(0, 9).map((_, i) => th('H' + (i + 1))).join('') +
-                th('前九', 'bg-gray-100') +
+                th(zF, 'bg-gray-100') +
                 pars.slice(9).map((_, i) => th('H' + (i + 10))).join('') +
-                th('後九', 'bg-gray-100') + th('總桿', 'bg-gray-100');
+                th(zB, 'bg-gray-100') + th('總桿', 'bg-gray-100');
 
             // 總桿低者在前（與明細表閱讀習慣一致）
             const sorted = [...played].sort((a, b) => (a['總桿數'] ?? 999) - (b['總桿數'] ?? 999));
@@ -362,7 +395,13 @@
         }
 
         // 繪製走勢圖
+        // 字體切換時重繪走勢圖（Chart.js 字級是 px，不跟根字級縮放）
+        let lastChartData = null;
+        function onFontChange() { if (lastChartData) renderChart(lastChartData); }
+
         function renderChart(data) {
+            lastChartData = data;
+            Chart.defaults.font.size = Math.round(12 * getFontLevel().pct / 100);
             const ctx = document.getElementById('scoreChart').getContext('2d');
 
             if (currentChart) {

@@ -195,10 +195,17 @@ courses:
     nines:
       - { name: "西", pars: [4,4,3,4,5,3,4,4,5], total: 36 }
       - { name: "東", pars: [4,3,4,4,5,4,4,3,5], total: 36 }
+      # 中區尚未打過、每洞 par 待補：admin.html 選到此區時要求現場輸入 9 洞 par，
+      # 發布時 publish.py 自動把 null 補登為實際值（只補 null，不覆寫已登錄的值）
+      - { name: "中", pars: null, total: null }
     default_combination: ["西", "東"]
-    par_total: 72
+    par_total: 72          # 僅為西＋東組合的合計；實際 par 一律由當場選定兩區加總
     # 難度指數 西 4,3,8,2,9,7,5,1,6、東 5,8,4,7,3,1,2,9,6
-    source: "iSwing 成績卡 2026-11-07"
+    source: "iSwing 成績卡 2026-11-07（西、東）"
+  # 分區登錄原則（2026-11-07 起）：每個球場以「九洞區」為單位登錄，不登錄固定 18 洞。
+  # 每場例賽在 admin.html 步驟①都必須選定並勾選確認本場實際下場的兩區，
+  # default_combination 只是預設選項，不代表免確認。
+  # 尚未打過的區可先登錄 pars: null，第一次打到時現場輸入、發布時自動補登。
   # 三個以上九洞區的球場（如 A/B/C 區）登錄範例：nines 列出所有區，
   # default_combination 給常用組合，admin.html 步驟①會出現區域下拉供當場選擇。
   # - id: "example_gc"
