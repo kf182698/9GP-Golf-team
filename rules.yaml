@@ -189,6 +189,16 @@ courses:
     par_total: 72
     # 碼數 藍 6855／白 6540／紅 5773；難度指數 前九 15,7,13,9,3,17,5,11,1、後九 16,18,8,12,14,4,10,6,2
     source: "手寫成績卡 2026-09-12"
+  - id: "xinfeng_gc"
+    name: "新豐高爾夫球場"
+    aliases: ["新豐"]
+    nines:
+      - { name: "西", pars: [4,4,3,4,5,3,4,4,5], total: 36 }
+      - { name: "東", pars: [4,3,4,4,5,4,4,3,5], total: 36 }
+    default_combination: ["西", "東"]
+    par_total: 72
+    # 難度指數 西 4,3,8,2,9,7,5,1,6、東 5,8,4,7,3,1,2,9,6
+    source: "iSwing 成績卡 2026-11-07"
   # 三個以上九洞區的球場（如 A/B/C 區）登錄範例：nines 列出所有區，
   # default_combination 給常用組合，admin.html 步驟①會出現區域下拉供當場選擇。
   # - id: "example_gc"
@@ -231,11 +241,11 @@ validation:
 # 排列順序: 依新年度差點由低至高（僅為閱讀方便，程式不依賴名冊順序）
 # 同分第二順位（年齡）由總幹事手動裁定，故名冊不儲存出生年月日
 players:
-  - { name: "陳翊彥", handicap: 13 }
+  - { name: "陳翊彥", handicap: 12 }
   - { name: "王建亞", handicap: 17 }
   - { name: "陳淂笙", handicap: 20 }
   - { name: "陳奕仲", handicap: 20 }
-  - { name: "賀錫敬", handicap: 22 }
+  - { name: "賀錫敬", handicap: 19 }
   - { name: "楊嘉一", handicap: 22 }
   - { name: "林家進", handicap: 23 }
   - { name: "何崇華", handicap: 28 }
@@ -244,7 +254,7 @@ players:
   - { name: "劉維智", handicap: 32 }
   - { name: "陳彥宇", handicap: 33 }
   - { name: "黃予安", handicap: 34 }
-  - { name: "曹勇良", handicap: 36 }
+  - { name: "曹勇良", handicap: 34 }
   - { name: "曾吟芳", handicap: 36 }
   # 2026-10 新年度入隊（新會員差點上限 36 起算）
   # 黃心瀅：2026-05-22 礁溪以來賓身分出賽；林寬宸：2026-09-12 濱海以來賓身分出賽。
