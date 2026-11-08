@@ -18,6 +18,15 @@
             }
         }
     </script>
+    <style>
+        /* 逐洞明細記號：博蒂＝紅字單圈、老鷹（含以下）＝紅字雙圈；其餘一律黑字。
+           尺寸用 em，跟著字體大小按鈕等比縮放。 */
+        .score-mark { display: inline-flex; align-items: center; justify-content: center;
+                      width: 1.7em; height: 1.7em; border-radius: 9999px; line-height: 1; }
+        .score-mark.birdie { color: #dc2626; font-weight: 700; border: 1.5px solid #dc2626; }
+        .score-mark.eagle  { color: #dc2626; font-weight: 700; border: 1.5px solid #dc2626;
+                             outline: 1.5px solid #dc2626; outline-offset: 2px; }
+    </style>
     <script>
         // 字體大小：Tailwind 以 rem 為單位，調整根字級即可整頁等比放大。
         // 選擇記在本機瀏覽器（localStorage），隱私模式讀不到時退回預設「中」。
@@ -98,7 +107,6 @@
                 <span id="detailCaret" class="text-white/80 text-sm">▲</span>
             </div>
             <div id="detailBody">
-                <div id="detailPar" class="px-4 py-2 text-xs text-gray-500 bg-gray-50 border-b"></div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
                         <thead class="bg-gray-50 text-gray-500">
@@ -106,6 +114,10 @@
                         </thead>
                         <tbody id="detailRows"></tbody>
                     </table>
+                </div>
+                <div class="px-4 py-2 text-xs text-gray-500 border-t flex flex-wrap gap-x-4 gap-y-1 items-center">
+                    <span class="flex items-center gap-1"><span class="score-mark birdie">3</span>博蒂 Birdie（低於標準桿 1 桿）</span>
+                    <span class="flex items-center gap-1"><span class="score-mark eagle">2</span>老鷹 Eagle（低於標準桿 2 桿以上）</span>
                 </div>
             </div>
         </div>
@@ -344,9 +356,6 @@
             const [zF, zB] = zones.length === 2 ? zones : ['前九', '後九'];
             document.getElementById('detailSub').textContent =
                 `${played.length} 人${zones.length === 2 ? `　${zF}＋${zB}區` : ''}${pars.length ? `　PAR ${parF + parB}` : ''}`;
-            document.getElementById('detailPar').innerHTML = pars.length
-                ? `Par｜${zF}：${pars.slice(0, 9).join(',')}（${parF}）　${zB}：${pars.slice(9).join(',')}（${parB}）`
-                : '';
 
             // 表頭：H1–H9、前九、H10–H18、後九、總桿
             const th = (t, cls = '') => `<th class="p-2 ${cls}">${t}</th>`;
@@ -359,20 +368,29 @@
 
             // 總桿低者在前（與明細表閱讀習慣一致）
             const sorted = [...played].sort((a, b) => (a['總桿數'] ?? 999) - (b['總桿數'] ?? 999));
-            document.getElementById('detailRows').innerHTML = sorted.map((d, idx) => {
+            // 標準桿列：置於球員成績上方，淡藍底區隔，逐洞對照每人桿數
+            const parCell = (v, cls = '') => `<td class="p-2 text-center font-mono text-sky-900 ${cls}">${v ?? '—'}</td>`;
+            const parRow = pars.length ? `<tr class="bg-sky-50 border-b-2 border-sky-200">
+                    <td class="p-2 font-semibold whitespace-nowrap sticky left-0 bg-sky-50 text-sky-900">標準桿</td>
+                    ${pars.slice(0, 9).map(v => parCell(v)).join('')}
+                    ${parCell(parF, 'font-bold bg-sky-100')}
+                    ${pars.slice(9).map(v => parCell(v)).join('')}
+                    ${parCell(parB, 'font-bold bg-sky-100')}
+                    ${parCell(parF + parB, 'font-bold bg-sky-100')}
+                </tr>` : '';
+
+            document.getElementById('detailRows').innerHTML = parRow + sorted.map((d, idx) => {
                 const h = d['逐洞'];
                 const cell = (v, i) => {
                     const p = pars[i];
-                    // 相對 par 上色：老鷹以上/博蒂=綠、柏忌=灰、雙柏忌以上=紅
-                    let cls = 'text-gray-700';
+                    // 一律黑字；低於標準桿才標記：−1 博蒂紅字單圈、−2 以下老鷹紅字雙圈
+                    let inner = v ?? '—';
                     if (p != null && v != null) {
                         const diff = v - p;
-                        if (diff <= -2) cls = 'text-green-700 font-bold';
-                        else if (diff === -1) cls = 'text-green-600 font-semibold';
-                        else if (diff === 1) cls = 'text-gray-500';
-                        else if (diff >= 2) cls = 'text-accent';
+                        if (diff <= -2) inner = `<span class="score-mark eagle" title="老鷹 Eagle">${v}</span>`;
+                        else if (diff === -1) inner = `<span class="score-mark birdie" title="博蒂 Birdie">${v}</span>`;
                     }
-                    return `<td class="p-2 text-center font-mono ${cls}">${v ?? '—'}</td>`;
+                    return `<td class="p-2 text-center font-mono text-gray-900">${inner}</td>`;
                 };
                 const bg = idx === 0 ? 'bg-orange-50' : '';
                 return `<tr class="border-t ${bg}">
