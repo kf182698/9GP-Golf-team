@@ -122,7 +122,8 @@ function newState() {
     cur: { p: 0, h: 0 },
     nearPin: [],               // 近洞獎得主（手動輸入，程式無法計算）
     manualTieOrder: [],        // 同分裁定順序（總幹事指定）
-    guestConfirmed: {},        // 名冊外姓名逐一確認為來賓 {姓名: true}（非新會員）
+    guestConfirmed: {},
+    capNotes: [],              // 草稿載入時被雙柏忌封頂的格子說明（顯示於總表）        // 名冊外姓名逐一確認為來賓 {姓名: true}（非新會員）
   };
 }
 
@@ -443,9 +444,20 @@ function applyDraft(draft) {
     S.coursePar = draft.course_par ?? S.holePars.reduce((a, b) => a + b, 0);
   }
   const roster = (rules.players || []).map(p => p.name);
+  S.capNotes = [];
   S.players = (draft.players || []).map(p => {
     const existing = S.players.find(sp => sp.name === p.name);
     const scores = existing ? existing.scores : [...nineCells(p.front_9), ...nineCells(p.back_9)];
+    // OCR 讀到超過雙柏忌的格子（iSwing 卡照實際桿數印）：封頂並標黃待校對，總表上方列出明細
+    const capHoles = [];
+    if (!existing) scores.forEach((v, h) => {
+      const c = holeCap(h);
+      if (v != null && c != null && v > c) {
+        capHoles.push(h);
+        S.capNotes.push(`${p.name} 第 ${h + 1} 洞 ${v}→${c}`);
+        scores[h] = c;
+      }
+    });
     // 名字匹配：uncertain/unmatched 才需要候選選項。
     // p.name_candidates 是 CLAUDE.md schema 定義的「已排版好」字串陣列
     // （如 "王建亞 95%"、"新增來賓：王建亚"）——不是純姓名，選中後寫入
@@ -474,7 +486,7 @@ function applyDraft(draft) {
       scores: scores,
       ocr: {
         validation: p.validation || "fail",
-        low: (p.low_confidence_holes || []).map(h => h - 1),      // 轉 0-based
+        low: [...new Set((p.low_confidence_holes || []).map(h => h - 1).concat(capHoles))],  // 轉 0-based
         unread: (p.unreadable_holes || []).map(h => h - 1),
         nameMatch: p.name_match || "exact",
       },
@@ -702,16 +714,21 @@ function renderStep3() {
       <span class="text-4xl font-black text-primary">第 ${h + 1} 洞</span>
       <span class="text-2xl text-gray-400 font-bold ml-2">par ${S.holePars[h]}</span>
       ${P.scores[h] != null ? `<span class="text-2xl text-accent font-bold ml-2">＝${P.scores[h]}</span>` : ""}
+      ${holeCap(h) != null ? `<div class="text-sm text-gray-500 mt-1">本洞最多計 <b class="text-accent">${holeCap(h)}</b> 桿（雙柏忌上限）</div>` : ""}
     </div>
 
     <div id="keypad" class="grid grid-cols-4 gap-2">${tensMode
-      ? [10, 11, 12, 13, 14, 15].map(n =>
-          `<button data-v="${n}" class="kv key bg-primary text-white text-2xl font-bold rounded-xl py-4">${n}</button>`).join("") +
+      ? [10, 11, 12, 13, 14, 15].map(n => {
+          const off = holeCap(h) != null && n > holeCap(h);
+          return `<button data-v="${n}" ${off ? "disabled" : ""} class="kv key text-2xl font-bold rounded-xl py-4
+             ${off ? "bg-gray-200 text-gray-400" : "bg-primary text-white"}">${n}</button>`; }).join("") +
         `<button id="tensCancel" class="key col-span-2 bg-gray-200 rounded-xl py-4 font-bold text-gray-600">取消</button>`
-      : [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n =>
-          `<button data-v="${n}" class="kv key text-2xl font-bold rounded-xl py-4
-             ${n === S.holePars[h] ? "bg-accent text-white" : "bg-gray-800 text-white"}">${n}</button>`).join("") +
-        `<button id="tens" class="key bg-gray-500 text-white rounded-xl py-4 font-bold">10+</button>
+      : [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => {
+          const off = holeCap(h) != null && n > holeCap(h);
+          return `<button data-v="${n}" ${off ? "disabled" : ""} class="kv key text-2xl font-bold rounded-xl py-4
+             ${off ? "bg-gray-200 text-gray-400" : n === S.holePars[h] ? "bg-accent text-white" : "bg-gray-800 text-white"}">${n}</button>`; }).join("") +
+        `<button id="tens" ${holeCap(h) != null && holeCap(h) < 10 ? "disabled" : ""}
+           class="key rounded-xl py-4 font-bold ${holeCap(h) != null && holeCap(h) < 10 ? "bg-gray-200 text-gray-400" : "bg-gray-500 text-white"}">10+</button>
          <button id="parKey" class="key col-span-2 bg-primary text-white rounded-xl py-4 font-bold text-lg">照 par（${S.holePars[h]}）</button>
          <button id="bsKey" class="key bg-gray-200 text-gray-600 rounded-xl py-4 font-bold text-xl">⌫</button>`}
     </div>
@@ -724,7 +741,7 @@ function renderStep3() {
   document.querySelectorAll(".kv").forEach(b => b.onclick = () => setScore(+b.dataset.v));
   if (tensMode) { $("tensCancel").onclick = () => { tensMode = false; render(); }; }
   else {
-    $("tens").onclick = () => { tensMode = true; render(); };
+    $("tens").onclick = () => { if (!$("tens").disabled) { tensMode = true; render(); } };
     $("parKey").onclick = () => setScore(S.holePars[S.cur.h]);
     $("bsKey").onclick = () => {
       const P = S.players[S.cur.p];
@@ -733,6 +750,18 @@ function renderStep3() {
       render();
     };
   }
+}
+
+// 單洞計桿上限（rules.yaml hole_score_cap）：雙柏忌＝par×2，effective_from 起的場次才套用
+function holeCap(h) {
+  const c = rules.hole_score_cap;
+  if (!c || c.max !== "double_par") return null;
+  if (c.effective_from && S.date && S.date < String(c.effective_from)) return null;
+  const p = S.holePars[h];
+  return Number.isInteger(p) ? p * 2 : null;
+}
+function overCapHoles(P) {
+  return P.scores.map((v, h) => (v != null && holeCap(h) != null && v > holeCap(h)) ? h : -1).filter(h => h >= 0);
 }
 
 function firstEmpty(P) {
@@ -750,6 +779,8 @@ function clearOcrFlag(P, h) {
 
 function setScore(v) {
   const P = S.players[S.cur.p];
+  const cap = holeCap(S.cur.h);
+  if (cap != null && v > cap) v = cap;   // 保險：鍵盤已停用超過上限的鍵
   P.scores[S.cur.h] = v;
   clearOcrFlag(P, S.cur.h);
   tensMode = false;
@@ -771,19 +802,22 @@ function renderStep4() {
     const done = p.scores.filter(v => v != null).length;
     const ok = done === 18;
     const pending = p.ocr ? p.ocr.low.length + p.ocr.unread.length : 0;
-    const status = !ok ? `缺 ${18 - done} 洞`
+    const over = overCapHoles(p).length;
+    const status = over ? `超過上限 ${over} 洞` : !ok ? `缺 ${18 - done} 洞`
       : pending > 0 ? `校對 ${pending} 格` : "✓";
-    const statusCls = !ok ? "text-accent font-bold"
+    const statusCls = (over || !ok) ? "text-accent font-bold"
       : pending > 0 ? "text-yellow-600 font-bold" : "text-green-600";
-    return `<tr data-i="${i}" class="prow border-b ${ok ? (pending ? "bg-yellow-50" : "") : "bg-red-50"}">
+    return `<tr data-i="${i}" class="prow border-b ${ok && !over ? (pending ? "bg-yellow-50" : "") : "bg-red-50"}">
       <td class="p-2 font-semibold">${p.name}${p.is_guest ? "<span class='text-accent text-xs ml-1'>賓</span>" : ""}</td>
       <td class="p-2 text-center font-mono">${sum(p.scores.slice(0, 9)) ?? "—"}</td>
       <td class="p-2 text-center font-mono">${sum(p.scores.slice(9)) ?? "—"}</td>
       <td class="p-2 text-center font-mono font-bold">${sum(p.scores) ?? "—"}</td>
       <td class="p-2 text-center text-sm ${statusCls}">${status}</td></tr>`;
   }).join("");
-  const allOk = S.players.length && S.players.every(p => p.scores.every(v => v != null));
+  const allOk = S.players.length && S.players.every(p => p.scores.every(v => v != null) && !overCapHoles(p).length);
   app().innerHTML = `
+  ${(S.capNotes || []).length ? `<div class="bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-3 text-sm text-yellow-900">
+    辨識草稿有 ${S.capNotes.length} 格超過雙柏忌上限，已自動封頂（請對照成績卡確認）：<br>${S.capNotes.join("、")}</div>` : ""}
   <div class="bg-white rounded-xl shadow overflow-hidden">
     <table class="w-full text-sm">
       <thead class="bg-primary text-white">
@@ -791,7 +825,7 @@ function renderStep4() {
         <th class="p-2">${S.nineNames[1]}</th><th class="p-2">總桿</th><th class="p-2">狀態</th></tr>
       </thead><tbody>${rows}</tbody>
     </table>
-    <p class="text-xs text-gray-400 p-3">紅底＝尚有未填洞，點該列可回去補；差點與淨桿由計分引擎重算，這裡只登總桿。</p>
+    <p class="text-xs text-gray-400 p-3">紅底＝尚有未填洞或超過雙柏忌上限，點該列可回去修改；差點與淨桿由計分引擎重算，這裡只登總桿。</p>
   </div>
   ${navBtns(true, allOk, allOk ? "前往發布" : "尚有未完成球員")}`;
   document.querySelectorAll(".prow").forEach(tr => tr.onclick = () => {

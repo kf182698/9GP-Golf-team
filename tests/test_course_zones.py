@@ -109,3 +109,44 @@ def test_backfill_aborts_when_course_missing(tmp_path):
     p.write_text("courses: []\n", encoding="utf-8")
     with pytest.raises(RuntimeError):
         fill_nine_pars_in_rules(str(p), [("不存在球場", "中", MIDDLE)])
+
+
+# ------------------ 單洞計桿上限（雙柏忌，2026-11-07 起）------------------
+
+from publish import apply_hole_cap  # noqa: E402
+
+
+def _capped_match(date):
+    m = match("西", "東", WEST + EAST)
+    m["date"] = date
+    p = m["players"][0]
+    p["front_9"] = [10] + p["front_9"][1:]          # 西 1 洞 par 4 打 10 → 上限 8
+    p["front_9_total"] = sum(p["front_9"])
+    p["gross"] = p["front_9_total"] + p["back_9_total"]
+    return m
+
+
+def test_hole_cap_applies_from_effective_date():
+    m = _capped_match("2026-12-05")
+    before = m["players"][0]["gross"]
+    changes = apply_hole_cap(m, load_rules(RULES))
+    assert changes == [("陳彥宇", 1, 10, 8)]
+    p = m["players"][0]
+    assert p["front_9"][0] == 8 and p["gross"] == before - 2
+    assert p["front_9_total"] == sum(p["front_9"]) and p["vs_par"] == p["gross"] - 72
+
+
+def test_hole_cap_not_retroactive():
+    m = _capped_match("2026-07-25")
+    assert apply_hole_cap(m, load_rules(RULES)) == []
+    assert m["players"][0]["front_9"][0] == 10
+
+
+def test_published_data_respects_cap_since_effective_date():
+    rows = json.loads((REPO_ROOT / "golf_scores.json").read_text(encoding="utf-8"))
+    since = load_rules(RULES)["hole_score_cap"]["effective_from"]
+    for r in rows:
+        if r["賽事日期"] >= since and r.get("逐洞"):
+            pars = r["每洞標準桿"]
+            assert all(v <= 2 * p for v, p in zip(r["逐洞"], pars)), r["球員姓名"]
+            assert sum(r["逐洞"]) == r["總桿數"], r["球員姓名"]

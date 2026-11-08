@@ -374,8 +374,15 @@
         }
 
         // 最新例賽快報：排名表（來賓標示、請假不列）
-        // 舊場次差點／淨桿為小數（如 32.3333），顯示取到小數一位；整數照原樣
-        const fmtNum = v => (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(1) : (v ?? '—');
+        // 差點一律顯示整數（四捨五入，.5 進位）。舊場次存的是小數（如 32.3333），
+        // 淨桿同步以「總桿 − 整數差點」顯示，數字才對得起來；golf_scores.json 原資料不改。
+        const hcpInt = v => typeof v === 'number' ? Math.round(v) : null;
+        const showHcp = d => hcpInt(d['差點']) ?? '—';
+        const showNet = d => {
+            const h = d['差點'], g = d['總桿數'];
+            if (typeof h === 'number' && !Number.isInteger(h) && typeof g === 'number') return g - Math.round(h);
+            return d['淨桿數'] ?? '—';
+        };
 
         // 歷次例賽下拉：最新在最上方；選定後整張表與逐洞明細改顯示該場
         function initEventSelect() {
@@ -407,8 +414,8 @@
                     <td class="p-2 text-center font-bold ${typeof d['名次'] === 'number' ? 'text-primary' : 'text-gray-400 text-xs'}">${d['名次']}</td>
                     <td class="p-2 font-semibold whitespace-nowrap">${d['球員姓名']}</td>
                     <td class="p-2 text-center font-mono">${d['總桿數'] ?? '—'}</td>
-                    <td class="p-2 text-center font-mono text-gray-500">${fmtNum(d['差點'])}</td>
-                    <td class="p-2 text-center font-mono">${fmtNum(d['淨桿數'])}</td>
+                    <td class="p-2 text-center font-mono text-gray-500">${showHcp(d)}</td>
+                    <td class="p-2 text-center font-mono">${showNet(d)}</td>
                     <td class="p-2 text-sm text-accent">${(d['所獲獎項'] || '').split('、').filter(Boolean)
                         .map(a => `<span class="whitespace-nowrap">${a}</span>`).join('、')}</td>
                 </tr>`).join('');
@@ -520,7 +527,7 @@
                          max: Math.min(hi, Math.ceil((Math.max(...v) + pad) / step) * step) };
             };
             const gross = data.map(d => d['總桿數']);
-            const hcp = data.map(d => d['差點']);
+            const hcp = data.map(d => hcpInt(d['差點']));
             const gR = range(gross, 1, 5, 50, 200);
             const hR = range(hcp, 1, 2, 0, 36);
             // 刻度間距：依範圍挑 5/10（總桿）、2/4（差點），手機上約 4~7 個刻度
@@ -641,8 +648,8 @@
                     detailsHtml = `
                         <div class="grid grid-cols-4 gap-4 text-center w-full md:w-auto">
                             <div><span class="block text-xs text-gray-400 mb-1">總桿</span><span class="font-bold text-lg text-primary">${d['總桿數']}</span></div>
-                            <div><span class="block text-xs text-gray-400 mb-1">淨桿</span><span class="font-semibold text-gray-600">${d['淨桿數'] ?? '—'}</span></div>
-                            <div><span class="block text-xs text-gray-400 mb-1">差點</span><span class="text-sm text-gray-500">${d['差點'] ?? '—'}</span></div>
+                            <div><span class="block text-xs text-gray-400 mb-1">淨桿</span><span class="font-semibold text-gray-600">${showNet(d)}</span></div>
+                            <div><span class="block text-xs text-gray-400 mb-1">差點</span><span class="text-sm text-gray-500">${showHcp(d)}</span></div>
                             <div><span class="block text-xs text-gray-400 mb-1">名次</span><span class="font-bold text-accent">${d['名次']}</span></div>
                         </div>
                     `;

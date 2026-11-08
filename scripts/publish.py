@@ -205,6 +205,40 @@ def apply_handicap_to_rules(rules_path, adjustments):
     return changed
 
 
+# ------------------ 單洞計桿上限（雙柏忌）------------------
+
+def apply_hole_cap(match_input, rules):
+    """依 rules.yaml `hole_score_cap` 把超過上限的單洞桿數封頂，並重算前後九、總桿、vs_par。
+
+    只在比賽日期 >= effective_from 時套用（之前的場次維持當時定案）。
+    直接修改 match_input，回傳調整明細 [(姓名, 洞號, 原桿數, 封頂後)]。
+    """
+    cap = rules.get("hole_score_cap") or {}
+    if cap.get("max") != "double_par":
+        return []
+    since = cap.get("effective_from")
+    if since and match_input.get("date", "") < str(since):
+        return []
+    pars = match_input.get("hole_pars") or []
+    if len(pars) != 18 or any(not isinstance(p, int) for p in pars):
+        return []
+    changes = []
+    for p in match_input.get("players", []):
+        holes = list(p.get("front_9") or []) + list(p.get("back_9") or [])
+        if len(holes) != 18:
+            continue
+        for i, (v, par) in enumerate(zip(holes, pars)):
+            if isinstance(v, int) and v > 2 * par:
+                changes.append((p["name"], i + 1, v, 2 * par))
+                holes[i] = 2 * par
+        if any(c[0] == p["name"] for c in changes):
+            p["front_9"], p["back_9"] = holes[:9], holes[9:]
+            p["front_9_total"], p["back_9_total"] = sum(holes[:9]), sum(holes[9:])
+            p["gross"] = sum(holes)
+            p["vs_par"] = p["gross"] - sum(pars)
+    return changes
+
+
 # ------------------ rules.yaml 未登錄九洞區 par 補登 ------------------
 
 def pending_nine_pars(match_input, rules):
@@ -275,6 +309,7 @@ def publish(rules_path, input_path, scores_path, dry_run=False):
     with open(scores_path, encoding="utf-8") as f:
         scores_rows = json.load(f)
 
+    capped = apply_hole_cap(match_input, rules)   # 先封頂再計分，總桿與排名都以封頂後為準
     prior = collect_prior_gross_winners(scores_rows, rules)
     result = score(rules, match_input, prior_gross_winners=prior)
 
@@ -292,7 +327,13 @@ def publish(rules_path, input_path, scores_path, dry_run=False):
     merged = merge_scores(scores_rows, new_rows, match_input["date"])
     adjustments = result.get("handicap_adjustment", [])
 
-    lines = [f"## {match_title(match_input, rules)} 發布結果", "", "### 淨桿排名"]
+    lines = [f"## {match_title(match_input, rules)} 發布結果", ""]
+    if capped:
+        lines.append("### 單洞上限封頂（雙柏忌）")
+        for name, hole, before, after in capped:
+            lines.append(f"- {name} 第 {hole} 洞 {before} → {after} 桿")
+        lines.append("")
+    lines.append("### 淨桿排名")
     for r in result["net_ranking"]:
         award = next((row["所獲獎項"] for row in new_rows
                       if row["球員姓名"] == r["name"]), None)
