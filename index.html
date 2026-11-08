@@ -87,8 +87,13 @@
     <!-- 最新例賽快報：載入即顯示，不必先選球員 -->
     <section id="latestMatch" class="max-w-5xl mx-auto mt-6 px-4 hidden">
         <div class="bg-white rounded-xl shadow overflow-hidden">
-            <div class="bg-primary text-white px-4 py-3 flex justify-between items-center">
-                <h2 class="font-bold">🏌️ 最新例賽　<span id="latestTitle" class="font-normal text-white/80 text-sm"></span></h2>
+            <div class="bg-primary text-white px-4 py-3 flex flex-wrap justify-between items-center gap-2">
+                <h2 class="font-bold">🏌️ <span id="eventHeading">最新例賽</span></h2>
+                <!-- 歷次例賽下拉：選任一場查看該場全員成績 -->
+                <label class="flex items-center gap-2 text-sm w-full sm:w-auto">
+                    <span class="text-white/80 whitespace-nowrap">選擇場次</span>
+                    <select id="eventSel" class="flex-1 sm:flex-none min-w-0 bg-white text-gray-800 rounded-lg px-2 py-1.5 font-semibold"></select>
+                </label>
             </div>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
@@ -99,6 +104,7 @@
                     <tbody id="latestRows"></tbody>
                 </table>
             </div>
+            <div id="eventLeave" class="px-4 py-2 text-xs text-gray-500 border-t hidden"></div>
         </div>
 
         <!-- 逐洞完整明細：資料來自 golf_scores.json 的「逐洞」欄，選定球員後隱藏 -->
@@ -211,6 +217,7 @@
                 golfData = await response.json();
                 updateLastUpdatedDate();
                 deriveCurrentMembers();
+                initEventSelect();
                 renderLatestMatch();  // 最新例賽快報（不必先選球員）
                 initCustomSelect(); // 資料讀取成功，初始化選單
                 openPlayerFromHash();
@@ -303,6 +310,7 @@
         }
 
         function showHome(push = true) {
+            renderLatestMatch();  // 回首頁一律回到最新一場
             const text = document.getElementById('selectedPlayerText');
             if (!document.getElementById('playerSelectBtn').disabled) text.textContent = '-- 請點擊選擇球員 --';
             document.getElementById('playerList').classList.add('hidden');
@@ -366,27 +374,48 @@
         }
 
         // 最新例賽快報：排名表（來賓標示、請假不列）
-        function renderLatestMatch() {
+        // 舊場次差點／淨桿為小數（如 32.3333），顯示取到小數一位；整數照原樣
+        const fmtNum = v => (typeof v === 'number' && !Number.isInteger(v)) ? v.toFixed(1) : (v ?? '—');
+
+        // 歷次例賽下拉：最新在最上方；選定後整張表與逐洞明細改顯示該場
+        function initEventSelect() {
+            const sel = document.getElementById('eventSel');
+            const events = [...new Map(golfData.filter(d => d['賽事日期'])
+                .map(d => [d['賽事日期'], d['例賽名稱']])).entries()]
+                .sort((a, b) => b[0].localeCompare(a[0]));
+            sel.innerHTML = events.map(([date, name], i) =>
+                `<option value="${date}">${date}　${(name || '').replace(/^\d{4}年\d{2}月例賽/, '').replace(/[（）]/g, '') || name}${i === 0 ? '（最新）' : ''}</option>`).join('');
+            sel.onchange = () => renderLatestMatch(sel.value);
+        }
+
+        function renderLatestMatch(date) {
             if (!golfData.length) return;
             const latestDate = golfData.map(d => d['賽事日期']).sort().at(-1);
-            const rows = golfData
-                .filter(d => d['賽事日期'] === latestDate && d['名次'] !== '請假')
+            const target = date || latestDate;
+            document.getElementById('eventSel').value = target;
+            document.getElementById('eventHeading').textContent = target === latestDate ? '最新例賽' : '歷史例賽';
+            const all = golfData.filter(d => d['賽事日期'] === target);
+            const rows = all
+                .filter(d => d['名次'] !== '請假')
                 .sort((a, b) => {
                     const ra = a['名次'], rb = b['名次'];
                     if (typeof ra === 'number' && typeof rb === 'number') return ra - rb;
                     return (typeof ra === 'number') ? -1 : 1;  // 來賓排最後
                 });
-            document.getElementById('latestTitle').textContent =
-                rows[0] ? rows[0]['例賽名稱'] : latestDate;
             document.getElementById('latestRows').innerHTML = rows.map(d => `
                 <tr class="border-t ${d['名次'] === 1 ? 'bg-orange-50' : ''}">
                     <td class="p-2 text-center font-bold ${typeof d['名次'] === 'number' ? 'text-primary' : 'text-gray-400 text-xs'}">${d['名次']}</td>
                     <td class="p-2 font-semibold whitespace-nowrap">${d['球員姓名']}</td>
                     <td class="p-2 text-center font-mono">${d['總桿數'] ?? '—'}</td>
-                    <td class="p-2 text-center font-mono text-gray-500">${d['差點'] ?? '—'}</td>
-                    <td class="p-2 text-center font-mono">${d['淨桿數'] ?? '—'}</td>
-                    <td class="p-2 text-sm text-accent">${d['所獲獎項'] ?? ''}</td>
+                    <td class="p-2 text-center font-mono text-gray-500">${fmtNum(d['差點'])}</td>
+                    <td class="p-2 text-center font-mono">${fmtNum(d['淨桿數'])}</td>
+                    <td class="p-2 text-sm text-accent">${(d['所獲獎項'] || '').split('、').filter(Boolean)
+                        .map(a => `<span class="whitespace-nowrap">${a}</span>`).join('、')}</td>
                 </tr>`).join('');
+            const leave = all.filter(d => d['名次'] === '請假').map(d => d['球員姓名']);
+            const leaveEl = document.getElementById('eventLeave');
+            leaveEl.textContent = leave.length ? `請假（${leave.length}）：${leave.join('、')}` : '';
+            leaveEl.classList.toggle('hidden', !leave.length);
             document.getElementById('latestMatch').classList.remove('hidden');
             renderLatestDetail(rows);
         }
