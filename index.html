@@ -19,10 +19,11 @@
         }
     </script>
     <style>
-        /* 逐洞明細記號：博蒂＝紅字單圈、老鷹（含以下）＝紅字雙圈；其餘一律黑字。
+        /* 逐洞明細記號：平標準桿＝紅字無圈、博蒂＝紅字單圈、老鷹（含以下）＝紅字雙圈；柏忌以上黑字。
            尺寸用 em，跟著字體大小按鈕等比縮放。 */
         .score-mark { display: inline-flex; align-items: center; justify-content: center;
                       width: 1.7em; height: 1.7em; border-radius: 9999px; line-height: 1; }
+        .score-par { color: #dc2626; }
         .score-mark.birdie { color: #dc2626; font-weight: 700; border: 1.5px solid #dc2626; }
         .score-mark.eagle  { color: #dc2626; font-weight: 700; border: 1.5px solid #dc2626;
                              outline: 1.5px solid #dc2626; outline-offset: 2px; }
@@ -116,6 +117,7 @@
                     </table>
                 </div>
                 <div class="px-4 py-2 text-xs text-gray-500 border-t flex flex-wrap gap-x-4 gap-y-1 items-center">
+                    <span class="flex items-center gap-1"><span class="score-mark score-par">4</span>平標準桿 Par</span>
                     <span class="flex items-center gap-1"><span class="score-mark birdie">3</span>博蒂 Birdie（低於標準桿 1 桿）</span>
                     <span class="flex items-center gap-1"><span class="score-mark eagle">2</span>老鷹 Eagle（低於標準桿 2 桿以上）</span>
                 </div>
@@ -383,12 +385,13 @@
                 const h = d['逐洞'];
                 const cell = (v, i) => {
                     const p = pars[i];
-                    // 一律黑字；低於標準桿才標記：−1 博蒂紅字單圈、−2 以下老鷹紅字雙圈
+                    // 柏忌以上黑字；平標準桿紅字無圈、−1 博蒂紅字單圈、−2 以下老鷹紅字雙圈
                     let inner = v ?? '—';
                     if (p != null && v != null) {
                         const diff = v - p;
                         if (diff <= -2) inner = `<span class="score-mark eagle" title="老鷹 Eagle">${v}</span>`;
                         else if (diff === -1) inner = `<span class="score-mark birdie" title="博蒂 Birdie">${v}</span>`;
+                        else if (diff === 0) inner = `<span class="score-par" title="平標準桿 Par">${v}</span>`;
                     }
                     return `<td class="p-2 text-center font-mono text-gray-900">${inner}</td>`;
                 };
