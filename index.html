@@ -150,7 +150,10 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-white p-4 rounded-xl shadow md:col-span-2">
                 <h2 class="text-lg font-bold text-primary mb-4">總桿與差點走勢</h2>
-                <canvas id="scoreChart" height="100"></canvas>
+                <!-- 固定高度容器：原本 canvas 依寬高比縮放，手機上只剩約 100px 高 -->
+                <div class="relative w-full h-72 md:h-80">
+                    <canvas id="scoreChart"></canvas>
+                </div>
             </div>
             <div class="bg-white p-4 rounded-xl shadow">
                 <h2 class="text-lg font-bold text-accent mb-4">🏆 榮譽榜</h2>
@@ -424,56 +427,98 @@
 
         function renderChart(data) {
             lastChartData = data;
-            Chart.defaults.font.size = Math.round(12 * getFontLevel().pct / 100);
+            const scale = getFontLevel().pct / 100;
+            const narrow = window.innerWidth < 640;
+            Chart.defaults.font.size = Math.round(12 * scale);
             const ctx = document.getElementById('scoreChart').getContext('2d');
 
             if (currentChart) {
                 currentChart.destroy();
             }
 
+            // 軸範圍上下各留空間，避免點貼邊；刻度取整數、數量限制，手機上不重疊
+            // 邊界對齊整數步長（總桿 5 桿、差點 2），刻度不會出現 120／122 這種擠在一起的尾數
+            const range = (vals, pad, step, lo, hi) => {
+                const v = vals.filter(x => typeof x === 'number');
+                if (!v.length) return {};
+                return { min: Math.max(lo, Math.floor((Math.min(...v) - pad) / step) * step),
+                         max: Math.min(hi, Math.ceil((Math.max(...v) + pad) / step) * step) };
+            };
+            const gross = data.map(d => d['總桿數']);
+            const hcp = data.map(d => d['差點']);
+            const gR = range(gross, 1, 5, 50, 200);
+            const hR = range(hcp, 1, 2, 0, 36);
+            // 刻度間距：依範圍挑 5/10（總桿）、2/4（差點），手機上約 4~7 個刻度
+            const stepFor = (r, small, big) => (r.max - r.min) / small > (narrow ? 6 : 8) ? big : small;
+            // 日期標籤縮短為「26/11」，完整日期留在提示框
+            const shortDate = s => s ? `${s.slice(2, 4)}/${s.slice(5, 7)}` : '';
+
             currentChart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: data.map(d => d['賽事日期']),
                     datasets: [{
-                        label: '總桿數',
-                        data: data.map(d => d['總桿數']),
+                        label: '總桿數（左軸）',
+                        data: gross,
                         borderColor: '#182E4A',
                         backgroundColor: '#182E4A',
                         borderWidth: 2,
-                        pointRadius: 4,
-                        pointBackgroundColor: '#AE320B',
+                        pointRadius: narrow ? 3 : 4,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#182E4A',
                         spanGaps: false,
-                        tension: 0.3,
+                        cubicInterpolationMode: 'monotone',  // 平滑但不超出實際數值
                         yAxisID: 'y'
                     }, {
-                        label: '差點',
-                        data: data.map(d => d['差點']),
+                        label: '差點（右軸）',
+                        data: hcp,
                         borderColor: '#AE320B',
                         backgroundColor: '#AE320B',
                         borderWidth: 2,
                         borderDash: [6, 4],
-                        pointRadius: 3,
+                        pointRadius: narrow ? 2 : 3,
+                        pointHoverRadius: 5,
                         spanGaps: true,
-                        tension: 0.3,
+                        cubicInterpolationMode: 'monotone',  // 平滑但不超出實際數值
                         yAxisID: 'y2'
                     }]
                 },
                 options: {
                     responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },  // 手指點到附近即顯示該場兩項數值
+                    layout: { padding: { top: 4, right: 2 } },
                     scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                autoSkip: true, maxTicksLimit: narrow ? 5 : 10,
+                                maxRotation: 0, minRotation: 0,
+                                callback: function (v) { return shortDate(this.getLabelForValue(v)); }
+                            }
+                        },
                         y: {
-                            reverse: true,
-                            title: { display: true, text: '總桿數' }
+                            reverse: true,   // 桿數越少越好，畫在上方
+                            ...gR,
+                            ticks: { stepSize: stepFor(gR, 5, 10), padding: 4 },
+                            grid: { color: '#eef0f3' }
                         },
                         y2: {
                             position: 'right',
-                            grid: { drawOnChartArea: false },
-                            title: { display: true, text: '差點' }
+                            ...hR,
+                            ticks: { stepSize: stepFor(hR, 2, 4), precision: 0, padding: 4 },
+                            grid: { drawOnChartArea: false }
                         }
                     },
                     plugins: {
-                        legend: { display: true, position: 'bottom' }
+                        legend: { display: true, position: 'bottom',
+                                  labels: { usePointStyle: true, pointStyle: 'line', boxWidth: 28, padding: 16 } },
+                        tooltip: {
+                            callbacks: {
+                                title: items => items[0]?.label || '',
+                                label: c => `${c.dataset.label.replace(/（.*）/, '')}：${c.parsed.y ?? '請假'}`
+                            }
+                        }
                     }
                 }
             });
