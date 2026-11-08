@@ -62,9 +62,9 @@
     <header class="bg-primary text-white p-6 shadow-md relative z-50">
         <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
             <div class="flex items-center gap-4 mb-2 md:mb-0">
-                <img src="./logo.png" alt="9GP球隊 Logo" class="w-14 h-14 rounded-full bg-white object-contain shadow-md border border-white/20">
+                <img src="./logo.png" onclick="showHome()" role="button" title="回首頁" alt="9GP球隊 Logo" class="w-14 h-14 rounded-full bg-white object-contain shadow-md border border-white/20 cursor-pointer">
                 <div>
-                    <h1 class="text-2xl font-bold tracking-wider">9GP球隊 成績查詢系統</h1>
+                    <h1 class="text-2xl font-bold tracking-wider cursor-pointer" onclick="showHome()" title="回首頁">9GP球隊 成績查詢系統</h1>
                     <div class="mt-1 text-sm text-white/80">成績更新日期：<span id="lastUpdatedDate">-</span></div>
                     <div id="fontBtns" class="mt-2 flex flex-wrap items-center gap-1" role="group" aria-label="字體大小"></div>
                 </div>
@@ -125,7 +125,11 @@
         </div>
     </section>
 
-    <main id="mainContent" class="max-w-5xl mx-auto mt-8 px-4 hidden relative z-10">
+    <main id="mainContent" class="max-w-5xl mx-auto mt-6 px-4 hidden relative z-10">
+        <button type="button" onclick="showHome()"
+            class="mb-4 inline-flex items-center gap-1 bg-white text-primary font-semibold px-4 py-2 rounded-lg shadow border border-gray-200 active:bg-gray-100">
+            ← 回首頁（最新例賽）
+        </button>
         
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <div class="bg-white p-4 rounded-xl shadow border-l-4 border-primary">
@@ -209,6 +213,7 @@
                 deriveCurrentMembers();
                 renderLatestMatch();  // 最新例賽快報（不必先選球員）
                 initCustomSelect(); // 資料讀取成功，初始化選單
+                openPlayerFromHash();
 
             } catch (error) {
                 console.error('資料讀取錯誤: ', error);
@@ -254,12 +259,8 @@
                 // 點擊球員後的動作
                 item.addEventListener('click', (e) => {
                     e.stopPropagation(); // 防止事件冒泡
-                    text.textContent = player;
                     list.classList.add('hidden'); // 關閉選單
-                    document.getElementById('mainContent').classList.remove('hidden');
-                    // 選定球員後收起逐洞明細（表格寬、與個人檢視無關），可點標題列展開
-                    document.getElementById('latestDetail').classList.add('hidden');
-                    updateDashboard(player);
+                    selectPlayer(player);
                 });
 
                 list.appendChild(item);
@@ -288,6 +289,51 @@
                     list.classList.add('hidden');
                 }
             });
+        }
+
+        // 首頁（最新例賽）與個人頁切換。用 history 記錄，手機返回手勢可回首頁；
+        // 網址帶 #player=姓名 時直接開該球員頁，方便分享連結。
+        function selectPlayer(player, push = true) {
+            document.getElementById('selectedPlayerText').textContent = player;
+            document.getElementById('latestMatch').classList.add('hidden');
+            document.getElementById('mainContent').classList.remove('hidden');
+            updateDashboard(player);
+            window.scrollTo({ top: 0 });
+            if (push) history.pushState({ player }, '', '#player=' + encodeURIComponent(player));
+        }
+
+        function showHome(push = true) {
+            const text = document.getElementById('selectedPlayerText');
+            if (!document.getElementById('playerSelectBtn').disabled) text.textContent = '-- 請點擊選擇球員 --';
+            document.getElementById('playerList').classList.add('hidden');
+            document.getElementById('mainContent').classList.add('hidden');
+            document.getElementById('latestMatch').classList.remove('hidden');
+            // 回首頁時逐洞明細恢復展開（若該場有逐洞資料）
+            if (document.getElementById('detailRows').children.length) {
+                document.getElementById('latestDetail').classList.remove('hidden');
+                document.getElementById('detailBody').classList.remove('hidden');
+                document.getElementById('detailCaret').textContent = '▲';
+            }
+            window.scrollTo({ top: 0 });
+            if (push && location.hash) history.pushState({}, '', location.pathname + location.search);
+        }
+
+        const hashPlayer = () => {
+            const m = /^#player=(.+)$/.exec(location.hash);
+            return m ? decodeURIComponent(m[1]) : null;
+        };
+        window.addEventListener('popstate', e => {
+            const p = e.state?.player || hashPlayer();
+            if (p && golfData.some(d => d['球員姓名'] === p)) selectPlayer(p, false);
+            else showHome(false);
+        });
+
+        function openPlayerFromHash() {
+            const p = hashPlayer();
+            if (p && golfData.some(d => d['球員姓名'] === p)) {
+                history.replaceState({ player: p }, '', location.hash);
+                selectPlayer(p, false);
+            }
         }
 
         // 更新所有儀表板資訊
